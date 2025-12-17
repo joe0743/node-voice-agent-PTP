@@ -93,60 +93,63 @@ wss.on('connection', async (clientWs) => {
     // Initialize Deepgram client
     const deepgram = createClient(CONFIG.deepgramApiKey);
 
-    // Create agent connection
-    deepgramAgent = deepgram.agent();
+    // Create agent connection (SDK will establish WebSocket to Deepgram)
+    const agent = deepgram.agent();
+
+    // Assign to outer scope variable for use in other handlers
+    deepgramAgent = agent;
 
     // Forward Welcome message from Deepgram to client
-    deepgramAgent.on('Welcome', (data) => {
-      if (clientWs.readyState === 1) { // WebSocket.OPEN
+    agent.on('Welcome', (data) => {
+      if (clientWs.readyState === 1) {
         clientWs.send(JSON.stringify(data));
       }
     });
 
     // Forward SettingsApplied message from Deepgram to client
-    deepgramAgent.on('SettingsApplied', (data) => {
+    agent.on('SettingsApplied', (data) => {
       if (clientWs.readyState === 1) {
         clientWs.send(JSON.stringify(data));
       }
     });
 
     // Forward ConversationText events from Deepgram to client
-    deepgramAgent.on('ConversationText', (data) => {
+    agent.on('ConversationText', (data) => {
       if (clientWs.readyState === 1) {
         clientWs.send(JSON.stringify(data));
       }
     });
 
     // Forward UserStartedSpeaking events from Deepgram to client
-    deepgramAgent.on('UserStartedSpeaking', (data) => {
+    agent.on('UserStartedSpeaking', (data) => {
       if (clientWs.readyState === 1) {
         clientWs.send(JSON.stringify(data));
       }
     });
 
     // Forward AgentThinking events from Deepgram to client
-    deepgramAgent.on('AgentThinking', (data) => {
+    agent.on('AgentThinking', (data) => {
       if (clientWs.readyState === 1) {
         clientWs.send(JSON.stringify(data));
       }
     });
 
     // Forward AgentAudioDone events from Deepgram to client
-    deepgramAgent.on('AgentAudioDone', (data) => {
+    agent.on('AgentAudioDone', (data) => {
       if (clientWs.readyState === 1) {
         clientWs.send(JSON.stringify(data));
       }
     });
 
     // Forward audio chunks from Deepgram to client
-    deepgramAgent.on('Audio', (audioData) => {
+    agent.on('Audio', (audioData) => {
       if (clientWs.readyState === 1) {
         clientWs.send(audioData, { binary: true });
       }
     });
 
     // Forward Error events from Deepgram to client
-    deepgramAgent.on('Error', (error) => {
+    agent.on('Error', (error) => {
       console.error('Deepgram agent error:', error);
       if (clientWs.readyState === 1) {
         // Map Deepgram errors to our error codes
@@ -166,14 +169,14 @@ wss.on('connection', async (clientWs) => {
     });
 
     // Forward Warning events from Deepgram to client
-    deepgramAgent.on('Warning', (data) => {
+    agent.on('Warning', (data) => {
       if (clientWs.readyState === 1) {
         clientWs.send(JSON.stringify(data));
       }
     });
 
     // Handle agent close
-    deepgramAgent.on('Close', () => {
+    agent.on('Close', () => {
       console.log('Deepgram agent connection closed');
       if (clientWs.readyState === 1) {
         clientWs.close();
