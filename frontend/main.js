@@ -1,7 +1,8 @@
 // DOM Elements
 const startButton = document.getElementById('startButton');
-const statusBanner = document.getElementById('statusBanner');
-const spinner = document.getElementById('spinner');
+const endButton = document.getElementById('endButton');
+const cancelButton = document.getElementById('cancelButton');
+const statusText = document.getElementById('statusText');
 const conversationHistory = document.getElementById('conversationHistory');
 
 // Browser detection
@@ -17,10 +18,22 @@ let isRecording = false;
 let audioQueue = [];
 let isPlaying = false;
 
-// Update status banner
+// Update status display
 function updateStatus(status, message) {
-  statusBanner.className = `status-banner ${status}`;
-  statusBanner.textContent = message;
+  statusText.className = `status-text ${status}`;
+  statusText.textContent = message;
+
+  // Update button states
+  if (status === 'connected') {
+    startButton.disabled = true;
+    endButton.disabled = false;
+  } else if (status === 'disconnected' || status === 'error') {
+    startButton.disabled = false;
+    endButton.disabled = true;
+  } else if (status === 'connecting') {
+    startButton.disabled = true;
+    endButton.disabled = true;
+  }
 }
 
 // Add message to conversation history
@@ -30,7 +43,7 @@ function addMessage(role, content) {
 
   const roleDiv = document.createElement('div');
   roleDiv.className = 'role';
-  roleDiv.textContent = role === 'user' ? 'You' : 'Assistant';
+  roleDiv.textContent = role === 'user' ? 'You:' : 'Agent:';
 
   const contentDiv = document.createElement('div');
   contentDiv.className = 'content';
@@ -138,7 +151,7 @@ function startStreaming() {
     isRecording = true;
   } catch (error) {
     console.error('Error starting audio stream:', error);
-    updateStatus('disconnected', 'Error: ' + error.message);
+    updateStatus('error', 'ERROR: ' + error.message);
   }
 }
 
@@ -167,9 +180,7 @@ function stopStreaming() {
 // Connect to WebSocket
 async function connect() {
   try {
-    updateStatus('connecting', 'Requesting microphone access...');
-    spinner.classList.remove('hidden');
-    startButton.disabled = true;
+    updateStatus('connecting', 'CONNECTING');
 
     // Create audio context early with explicit sample rate
     audioContext = new AudioContext({ sampleRate: 24000 });
@@ -212,7 +223,7 @@ async function connect() {
       console.log('Firefox detected: Using minimal audio constraints');
     }
 
-    updateStatus('connecting', 'Connecting to voice agent...');
+    updateStatus('connecting', 'CONNECTING');
 
     // Connect to WebSocket
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -226,7 +237,7 @@ async function connect() {
     socket.onopen = () => {
       console.log('WebSocket connected');
       isConnected = true;
-      updateStatus('connected', 'Connected - Waiting for Welcome...');
+      updateStatus('connecting', 'CONNECTING');
     };
 
     socket.onmessage = async (event) => {
@@ -261,7 +272,7 @@ async function connect() {
           console.log('Received message:', message);
 
           if (message.type === 'Welcome') {
-            updateStatus('connected', 'Connected - Configuring...');
+            updateStatus('connected', 'CONNECTED');
 
             // Send Settings message
             const settings = {
@@ -311,20 +322,20 @@ Remember that you have a voice interface. You can listen and speak, and all your
 
             socket.send(JSON.stringify(settings));
           } else if (message.type === 'SettingsApplied') {
-            updateStatus('connected', 'Ready - Speak into your microphone');
+            updateStatus('connected', 'CONNECTED');
             startStreaming();
           } else if (message.type === 'ConversationText') {
             // Add message to conversation history
             addMessage(message.role, message.content);
           } else if (message.type === 'Error') {
             console.error('Agent error:', message);
-            updateStatus('disconnected', 'Error: ' + message.description);
+            updateStatus('error', 'ERROR: ' + message.description);
           } else if (message.type === 'UserStartedSpeaking') {
-            updateStatus('connected', 'Listening...');
+            updateStatus('connected', 'CONNECTED');
           } else if (message.type === 'AgentThinking') {
-            updateStatus('connected', 'Agent thinking...');
+            updateStatus('connected', 'CONNECTED');
           } else if (message.type === 'AgentAudioDone') {
-            updateStatus('connected', 'Ready - Speak into your microphone');
+            updateStatus('connected', 'CONNECTED');
           }
         } catch (error) {
           console.error('Error parsing message:', error);
@@ -334,20 +345,20 @@ Remember that you have a voice interface. You can listen and speak, and all your
 
     socket.onerror = (error) => {
       console.error('WebSocket error:', error);
-      updateStatus('disconnected', 'Connection error');
+      updateStatus('error', 'ERROR: Connection error');
       disconnect();
     };
 
     socket.onclose = () => {
       console.log('WebSocket closed');
       isConnected = false;
-      updateStatus('disconnected', 'Disconnected');
+      updateStatus('disconnected', 'DISCONNECTED');
       disconnect();
     };
 
   } catch (error) {
     console.error('Error connecting:', error);
-    updateStatus('disconnected', 'Error: ' + error.message);
+    updateStatus('error', 'ERROR: ' + error.message);
     disconnect();
   }
 }
@@ -362,20 +373,30 @@ function disconnect() {
   }
 
   isConnected = false;
-  spinner.classList.add('hidden');
-  startButton.disabled = false;
-  startButton.textContent = 'Start Conversation';
-  updateStatus('disconnected', 'Disconnected');
+  updateStatus('disconnected', 'DISCONNECTED');
 }
 
-// Button click handler
+// Clear conversation history
+function clearConversation() {
+  conversationHistory.innerHTML = '';
+}
+
+// Button click handlers
 startButton.addEventListener('click', () => {
   if (!isConnected) {
-    startButton.textContent = 'Connecting...';
     connect();
-  } else {
+  }
+});
+
+endButton.addEventListener('click', () => {
+  if (isConnected) {
     disconnect();
   }
+});
+
+cancelButton.addEventListener('click', () => {
+  disconnect();
+  clearConversation();
 });
 
 // Cleanup on page unload
