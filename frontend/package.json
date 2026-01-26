@@ -1,7 +1,8 @@
 {
-  "name": "@deepgram/node-voice-agent-frontend",
+  "name": "@deepgram/voice-agent-html",
   "version": "1.0.0",
-  "description": "Frontend for Deepgram Voice Agent",
+  "private": true,
+  "description": "Minimal HTML starter for Deepgram Voice Agent with design system styles",
   "main": "index.html",
   "type": "module",
   "scripts": {
@@ -12,20 +13,28 @@
   "keywords": [
     "deepgram",
     "voice-agent",
+    "conversational-ai",
     "html",
     "javascript",
-    "css"
+    "css",
+    "audio",
+    "websocket"
   ],
   "author": "Deepgram Starter UIs Team",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/deepgram-starters/node-voice-agent.git",
-    "directory": "frontend"
+    "url": "https://github.com/deepgram/starter-uis.git",
+    "directory": "apps/voice-agent-html"
   },
   "engines": {
     "node": ">=14.0.0"
   },
+  "browserslist": [
+    "defaults",
+    "not ie 11",
+    "not op_mini all"
+  ],
   "dependencies": {
     "@deepgram/styles": "latest"
   },

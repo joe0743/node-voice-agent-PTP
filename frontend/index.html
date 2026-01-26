@@ -1,328 +1,549 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Deepgram Voice Agent</title>
 
-    <!-- Font Awesome for icons -->
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css"
-      integrity="sha512-z3gLpd7yknf1YoNbCzqRKc4qyor8gaKU1qmn+CShxbuBusANI9QpRohGBreCFkKxLhei6S9CQXFEbbKuqLg0DA=="
-      crossorigin="anonymous"
-      referrerpolicy="no-referrer"
-    />
+<!--
+  ============================================================================
+  VOICE AGENT HTML STARTER - FRONTEND UI
+  ============================================================================
 
-    <!-- Deepgram Design System Styles -->
-    <link
-      rel="stylesheet"
-      href="./node_modules/@deepgram/styles/dist/deepgram.css"
-    />
+  This is a voice-enabled chat interface built with:
+  - Pure HTML/CSS/JavaScript (no frameworks)
+  - Deepgram Design System for styling
+  - WebSocket for real-time agent communication
+  - WebAudio API for microphone capture and audio playback
+  - Responsive layout with three-column design
 
-    <!-- Application JavaScript -->
-    <script type="module" src="/main.js"></script>
+  LAYOUT:
+  - Left Sidebar: Agent configuration controls
+  - Main Content: Chat interface with voice controls
+  - Right Sidebar: Connection stats and status
+-->
 
-    <style>
-      * {
-        box-sizing: border-box;
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Voice Agent demo using Deepgram">
+  <title>Deepgram Voice Agent</title>
+
+  <!-- External Dependencies -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css"
+    integrity="sha512-z3gLpd7yknf1YoNbCzqRKc4qyor8gaKU1qmn+CShxbuBusANI9QpRohGBreCFkKxLhei6S9CQXFEbbKuqLg0DA=="
+    crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link rel="stylesheet" href="./node_modules/@deepgram/styles/dist/deepgram.css" />
+  <script type="module" src="/main.js"></script>
+
+  <style>
+    /* ===================================================================
+       LAYOUT & BACKGROUND
+       =================================================================== */
+
+    body {
+      background: var(--dg-charcoal, #1a1a1f);
+      margin: 0;
+      padding: 0;
+    }
+
+    /* ===================================================================
+       COLUMN STYLING
+       =================================================================== */
+
+    .dg-column--sidebar-left {
+      border-right: 1px solid rgba(255, 255, 255, 0.1);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      background: var(--dg-almost-black, #050506);
+      overflow-y: auto;
+    }
+
+    .dg-column--main {
+      background: var(--dg-background, #0b0b0c);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .dg-column--sidebar-right {
+      border-left: 1px solid rgba(255, 255, 255, 0.1);
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      background: var(--dg-almost-black, #050506);
+      overflow-y: auto;
+    }
+
+    @media (min-width: 768px) {
+      .dg-column--sidebar-right {
+        border-top: none;
+      }
+    }
+
+    @media (min-width: 1024px) {
+      .dg-column--sidebar-left {
+        border-bottom: none;
+      }
+    }
+
+    /* ===================================================================
+       CUSTOM COMPONENTS - Voice Agent Specific
+       These are custom components that may be ported to starter UI later
+       =================================================================== */
+
+    /* Chat Interface */
+    .chat-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      position: relative;
+    }
+
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .chat-message {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      max-width: 75%;
+      animation: messageSlide 0.2s ease-out;
+    }
+
+    @keyframes messageSlide {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
       }
 
-      body {
-        margin: 0;
-        padding: 0;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-          Oxygen, Ubuntu, Cantarell, sans-serif;
-        background-color: #1a1a1a;
-        color: #ffffff;
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .chat-message--agent {
+      align-self: flex-start;
+    }
+
+    .chat-message--user {
+      align-self: flex-end;
+      flex-direction: row-reverse;
+    }
+
+    .chat-message__avatar {
+      width: 2rem;
+      height: 2rem;
+      border-radius: 50%;
+      background: var(--dg-primary, #13ef95);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--dg-almost-black, #050506);
+      font-size: 0.875rem;
+      flex-shrink: 0;
+    }
+
+    .chat-message--user .chat-message__avatar {
+      background: var(--dg-secondary, #8a3ffc);
+    }
+
+    .chat-message__bubble {
+      padding: 0.75rem 1rem;
+      border-radius: 1rem;
+      background: var(--dg-charcoal, #1a1a1f);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--dg-text, #fbfbff);
+      font-size: 0.9375rem;
+      line-height: 1.5;
+    }
+
+    .chat-message--user .chat-message__bubble {
+      background: var(--dg-secondary, #8a3ffc);
+      border-color: var(--dg-secondary, #8a3ffc);
+    }
+
+    /* Metadata/System Messages */
+    .chat-message--system {
+      align-self: center;
+      max-width: 80%;
+      margin: 0.5rem 0;
+      padding: 0.5rem 1rem;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 0.5rem;
+      font-size: 0.75rem;
+      color: var(--dg-muted, #949498);
+      text-align: center;
+      opacity: 0.7;
+    }
+
+    .chat-input-container {
+      padding: 1rem 1.5rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      background: var(--dg-almost-black, #050506);
+    }
+
+    .chat-input-wrapper {
+      display: flex;
+      gap: 0.75rem;
+      align-items: flex-end;
+    }
+
+    .chat-input-wrapper textarea {
+      flex: 1;
+      resize: none;
+      min-height: 2.5rem;
+      max-height: 8rem;
+    }
+
+    .chat-input-wrapper button {
+      flex-shrink: 0;
+    }
+
+    /* Connect Overlay */
+    .connect-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(11, 11, 12, 0.95);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+
+    .connect-overlay.hidden {
+      display: none;
+    }
+
+    .connect-prompt {
+      text-align: center;
+      padding: 2rem;
+    }
+
+    .connect-prompt__icon {
+      font-size: 3rem;
+      color: var(--dg-primary, #13ef95);
+      margin-bottom: 1rem;
+    }
+
+    .connect-prompt__title {
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: var(--dg-text, #fbfbff);
+      margin-bottom: 0.5rem;
+    }
+
+    .connect-prompt__subtitle {
+      color: var(--dg-muted, #949498);
+      margin-bottom: 2rem;
+    }
+
+    /* Disconnect Button Container */
+    .disconnect-container {
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+      z-index: 5;
+    }
+
+    /* Status Stats */
+    .status-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .status-item {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .status-item__label {
+      font-size: 0.7rem;
+      color: var(--dg-muted, #949498);
+      font-weight: 500;
+    }
+
+    .status-item__value {
+      font-size: 0.875rem;
+      color: var(--dg-text, #fbfbff);
+    }
+
+    .status-item__value--success {
+      color: var(--dg-primary, #13ef95);
+    }
+
+    .status-item__value--error {
+      color: var(--dg-error, #ff4444);
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.375rem;
+      font-size: 0.875rem;
+    }
+
+    .status-badge--connected {
+      color: var(--dg-primary, #13ef95);
+    }
+
+    .status-badge--disconnected {
+      color: var(--dg-muted, #949498);
+    }
+
+    .status-indicator {
+      width: 0.5rem;
+      height: 0.5rem;
+      border-radius: 50%;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    .status-indicator--connected {
+      background: var(--dg-primary, #13ef95);
+    }
+
+    .status-indicator--disconnected {
+      background: var(--dg-muted, #949498);
+      animation: none;
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1;
       }
 
-      /* App Header */
-      .app-header {
-        background-color: #0f0f0f;
-        border-bottom: 1px solid #2a2a2a;
-        padding: 1rem 2rem;
-        position: sticky;
-        top: 0;
-        z-index: 100;
+      50% {
+        opacity: 0.5;
       }
+    }
 
-      .header-content {
-        max-width: 1200px;
-        margin: 0 auto;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      }
+    /* Configuration Form */
+    .config-section {
+      margin-bottom: 1.5rem;
+    }
 
-      .header-title {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-      }
+    .config-section:last-child {
+      margin-bottom: 0;
+    }
 
-      .logo-icon {
-        font-size: 1.5rem;
-      }
+    .dg-form-label {
+      display: block;
+      margin-bottom: 0.5rem;
+    }
 
-      .header-title h1 {
-        font-size: 1.5rem;
-        margin: 0;
-        font-weight: 600;
-        color: #ffffff;
-      }
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
 
-      /* Constrained Container */
-      .constrained-container {
-        max-width: 1200px;
-        margin: 0 auto;
-        padding: 2rem;
-      }
-
-      /* Card */
-      .card {
-        background-color: #0f0f0f;
-        border: 1px solid #2a2a2a;
-        border-radius: 8px;
-        padding: 1.5rem;
-        margin-bottom: 1.5rem;
-      }
-
-      .card-title {
-        font-size: 1.1rem;
-        font-weight: 600;
-        margin: 0 0 1.5rem 0;
-        color: #ffffff;
-      }
-
-      /* Status Section */
-      .status-section {
-        margin-bottom: 1.5rem;
-      }
-
-      /* Action Group */
-      .dg-action-group {
-        display: flex;
-        gap: 1rem;
-        flex-wrap: wrap;
-      }
-
-      /* Conversation History */
-      .conversation-history {
-        min-height: 400px;
-        max-height: 480px;
-        overflow-y: auto;
-        padding: 1rem;
-        background-color: #1a1a1a;
-        border-radius: 6px;
-        border: 1px solid #2a2a2a;
-      }
-
-      .conversation-history:empty::before {
-        content: 'Click "Start Conversation" to begin...';
-        color: #666;
-        font-style: italic;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        min-height: 400px;
-      }
-
-      /* Message Styles */
-      .message {
-        margin-bottom: 1rem;
-        display: flex;
-        flex-direction: column;
-        max-width: 70%;
-        clear: both;
-      }
-
-      .message.user {
-        align-items: flex-start;
-        float: left;
-      }
-
-      .message.assistant {
-        align-items: flex-end;
-        float: right;
-        margin-left: auto;
-      }
-
-      .message .role {
-        font-size: 0.85rem;
-        font-weight: 700;
-        margin-bottom: 0.5rem;
-        text-transform: capitalize;
-      }
-
-      .message.user .role {
-        color: #00d4ff;
-      }
-
-      .message.assistant .role {
-        color: #13ef95;
-      }
-
-      .message .content {
-        font-size: 1rem;
-        line-height: 1.6;
-        color: #e0e0e0;
-        background-color: #2a2a2a;
-        padding: 0.75rem 1rem;
-        border-radius: 12px;
-        word-wrap: break-word;
-      }
-
-      .message.user .content {
-        background-color: #1a3a4a;
-        border-bottom-left-radius: 4px;
-      }
-
-      .message.assistant .content {
-        background-color: #1a3a2a;
-        border-bottom-right-radius: 4px;
-      }
-
-      .message .content::before {
-        content: "> ";
-        color: #666;
-      }
-
-      .message .timestamp {
-        font-size: 0.75rem;
-        color: #666;
-        margin-top: 0.5rem;
-      }
-
-      /* Clear floats after messages */
-      .conversation-history::after {
-        content: "";
-        display: table;
-        clear: both;
-      }
-
-      /* Scrollbar Styling */
-      .conversation-history::-webkit-scrollbar {
-        width: 8px;
-      }
-
-      .conversation-history::-webkit-scrollbar-track {
-        background: #1a1a1a;
-      }
-
-      .conversation-history::-webkit-scrollbar-thumb {
-        background: #3a3a3a;
-        border-radius: 4px;
-      }
-
-      .conversation-history::-webkit-scrollbar-thumb:hover {
-        background: #4a4a4a;
-      }
-
-      /* Scroll behavior */
-      .conversation-history {
-        scroll-behavior: smooth;
-      }
-    </style>
-  </head>
-  <body>
-    <!-- Header  -->
-    <header
-      class="dg-section dg-section--compact"
-      style="border-bottom: 1px solid rgba(255, 255, 255, 0.1)"
-    >
-      <div class="dg-constrain-width">
-        <div
-          style="
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-          "
-        >
-          <div>
-            <h1 class="dg-section-heading" style="margin-bottom: 0">
-              <i class="fa-solid fa-headphones dg-text-primary"></i>
-              Deepgram Voice Agent
-            </h1>
-          </div>
-          <div>
-            <a
-              href="https://developers.deepgram.com/docs/voice-agent"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="dg-btn dg-btn--ghost dg-btn--sm"
-            >
-              <i class="fa-solid fa-book"></i> Docs
-            </a>
-          </div>
-        </div>
+<body>
+  <!-- Header -->
+  <header class="dg-header">
+    <div class="dg-header__container">
+      <div class="dg-header__logo">
+        <span class="dg-header__logo-text">Deepgram Voice Agent</span>
       </div>
-    </header>
-
-    <div class="constrained-container">
-      <!-- Conversation Card -->
-      <div class="card">
-        <h2 class="card-title">Conversation</h2>
-        <div id="conversationHistory" class="conversation-history"></div>
-      </div>
-      <!-- Controls Card -->
-      <div class="card">
-        <h2 class="card-title">Conversation Controls</h2>
-
-        <div class="dg-columns" style="width: 100%; max-width: 100%">
-          <div class="dg-columns__wrapper">
-            <!-- Left Side: Status & Controls -->
-            <aside class="dg-column--xl dg-column--sidebar-left">
-              <!-- Status Display -->
-              <div class="status-section" style="margin-bottom: 1rem">
-                <div id="statusBanner" class="dg-status dg-status--error">
-                  <span id="statusText">DISCONNECTED</span>
-                </div>
-              </div>
-
-              <!-- Action Buttons -->
-              <div class="dg-action-group">
-                <button id="startButton" class="dg-btn dg-btn--primary">
-                  <i class="fa-solid fa-play"></i> Start
-                </button>
-                <button
-                  id="endButton"
-                  class="dg-btn dg-btn--danger-ghost"
-                  disabled
-                >
-                  <i class="fa-solid fa-stop"></i> End
-                </button>
-                <button id="cancelButton" class="dg-btn dg-btn--secondary">
-                  <i class="fa-solid fa-xmark"></i> Cancel
-                </button>
-              </div>
-            </aside>
-
-            <!-- Right Side: Text Input -->
-            <main class="dg-column dg-column--main">
-              <div class="dg-form-field" style="margin-top: 1rem">
-                <label class="dg-form-label">Inject User Message</label>
-                <div style="display: flex; gap: 0.5rem; align-items: center">
-                  <input
-                    type="text"
-                    id="injectUserMessageInput"
-                    class="dg-input"
-                    placeholder="Enter text to send to the agent"
-                    style="flex: 1"
-                  />
-                  <button
-                    id="sendButton"
-                    class="dg-btn dg-btn--primary"
-                    style="margin-left: 0.5rem"
-                  >
-                    <i class="fa-solid fa-paper-plane"></i> Send
-                  </button>
-                </div>
-              </div>
-            </main>
-          </div>
-        </div>
-      </div>
+      <nav class="dg-header__nav">
+        <a href="https://developers.deepgram.com/docs/agent" class="dg-btn dg-btn--ghost dg-btn--sm" target="_blank"
+          rel="noopener noreferrer">Docs</a>
+        <a href="https://console.deepgram.com" class="dg-btn dg-btn--secondary dg-btn--sm" target="_blank"
+          rel="noopener noreferrer">Free API Key</a>
+      </nav>
     </div>
-  </body>
+  </header>
+
+  <!-- Main Layout -->
+  <div class="dg-columns" style="width: 100%; max-width: 100%; min-height: calc(100vh - 65px);">
+    <div class="dg-columns__wrapper">
+
+      <!-- ====================================================================
+           LEFT SIDEBAR - Agent Configuration
+           ==================================================================== -->
+      <aside class="dg-column dg-column--sidebar-left dg-column--lg">
+        <div class="dg-content-box">
+          <h3 class="dg-form-label" style="margin-bottom: 1rem;">Configuration</h3>
+
+          <form id="configForm">
+            <!-- Listen Model -->
+            <div class="config-section">
+              <label class="dg-form-label" for="listenModel">
+                <i class="fa-solid fa-microphone"></i> Listen (STT)
+              </label>
+              <select id="listenModel" class="dg-input">
+                <option value="nova-2">Nova 2</option>
+                <option value="nova-3">Nova 3</option>
+              </select>
+            </div>
+
+            <!-- Speak Model -->
+            <div class="config-section">
+              <label class="dg-form-label" for="speakModel">
+                <i class="fa-solid fa-volume-high"></i> Speak (TTS)
+              </label>
+              <select id="speakModel" class="dg-input">
+                <option value="aura-asteria-en">Aura Asteria</option>
+                <option value="aura-luna-en">Aura Luna</option>
+                <option value="aura-stella-en">Aura Stella</option>
+                <option value="aura-athena-en">Aura Athena</option>
+                <option value="aura-hera-en">Aura Hera</option>
+                <option value="aura-orion-en">Aura Orion</option>
+                <option value="aura-arcas-en">Aura Arcas</option>
+                <option value="aura-perseus-en">Aura Perseus</option>
+                <option value="aura-angus-en">Aura Angus</option>
+                <option value="aura-orpheus-en">Aura Orpheus</option>
+                <option value="aura-helios-en">Aura Helios</option>
+                <option value="aura-zeus-en">Aura Zeus</option>
+              </select>
+            </div>
+
+            <!-- Think Model -->
+            <div class="config-section">
+              <label class="dg-form-label" for="thinkModel">
+                <i class="fa-solid fa-brain"></i> Think (LLM)
+              </label>
+              <select id="thinkModel" class="dg-input">
+                <option value="gpt-4o-mini">GPT-4o Mini</option>
+                <option value="gpt-4o">GPT-4o</option>
+              </select>
+            </div>
+
+            <!-- System Prompt -->
+            <div class="config-section">
+              <label class="dg-form-label" for="systemPrompt">
+                <i class="fa-solid fa-comment-dots"></i> System Prompt
+              </label>
+              <textarea id="systemPrompt" class="dg-input" rows="4">You are a helpful assistant.</textarea>
+            </div>
+
+            <!-- Update Settings Button (shown when connected and changes made) -->
+            <button type="button" id="updateSettingsBtn" class="dg-btn dg-btn--primary hidden"
+              style="width: 100%; margin-top: 1rem;" disabled>
+              <i class="fa-solid fa-arrow-up"></i>
+              Update Settings
+            </button>
+          </form>
+        </div>
+      </aside>
+
+      <!-- ====================================================================
+           MAIN CONTENT - Chat Interface
+           ==================================================================== -->
+      <main class="dg-column dg-column--main">
+        <div class="chat-container">
+          <!-- Connect Overlay -->
+          <div class="connect-overlay" id="connectOverlay">
+            <div class="connect-prompt">
+              <div class="connect-prompt__icon">
+                <i class="fa-solid fa-comments"></i>
+              </div>
+              <h2 class="connect-prompt__title">Voice Agent Ready</h2>
+              <p class="connect-prompt__subtitle">Configure settings and click Connect to start</p>
+
+              <!-- Connect Button -->
+              <button type="button" id="connectBtn" class="dg-btn dg-btn--primary dg-btn--lg">
+                <i class="fa-solid fa-plug"></i>
+                Connect
+              </button>
+            </div>
+          </div>
+
+          <!-- Disconnect Button (hidden, shown when connected) -->
+          <div class="disconnect-container hidden" id="disconnectContainer">
+            <button type="button" id="disconnectBtn" class="dg-btn dg-btn--secondary dg-btn--sm">
+              <i class="fa-solid fa-plug-circle-xmark"></i>
+              Disconnect
+            </button>
+          </div>
+
+          <!-- Chat Messages -->
+          <div class="chat-messages" id="chatMessages">
+            <!-- Messages will be inserted here dynamically -->
+          </div>
+
+          <!-- Text Input -->
+          <div class="chat-input-container">
+            <div class="chat-input-wrapper">
+              <textarea id="messageInput" class="dg-input" placeholder="Type a message..." rows="1" disabled></textarea>
+              <button type="button" id="sendBtn" class="dg-btn dg-btn--primary" disabled>
+                <i class="fa-solid fa-paper-plane"></i>
+                Send
+              </button>
+            </div>
+          </div>
+        </div>
+      </main>
+
+    </div><!-- end dg-columns__wrapper -->
+
+    <!-- ====================================================================
+         RIGHT SIDEBAR - Status & Stats
+         ==================================================================== -->
+    <aside class="dg-column dg-column--sidebar-right">
+      <div class="dg-content-box">
+        <h3 class="dg-form-label" style="margin-bottom: 1rem;">Status</h3>
+
+        <div class="status-grid">
+          <!-- Connection Status -->
+          <div class="status-item">
+            <div class="status-item__label">Connection</div>
+            <div class="status-item__value">
+              <span class="status-badge status-badge--disconnected" id="connectionStatus">
+                <span class="status-indicator status-indicator--disconnected"></span>
+                Disconnected
+              </span>
+            </div>
+          </div>
+
+          <!-- Agent State -->
+          <div class="status-item">
+            <div class="status-item__label">Agent State</div>
+            <div class="status-item__value" id="agentState">Idle</div>
+          </div>
+
+          <!-- Microphone Status -->
+          <div class="status-item">
+            <div class="status-item__label">Microphone</div>
+            <div class="status-item__value" id="micStatus">Inactive</div>
+          </div>
+
+          <!-- Messages Sent -->
+          <div class="status-item">
+            <div class="status-item__label">Messages Sent</div>
+            <div class="status-item__value" id="messagesSent">0</div>
+          </div>
+
+          <!-- Messages Received -->
+          <div class="status-item">
+            <div class="status-item__label">Messages Received</div>
+            <div class="status-item__value" id="messagesReceived">0</div>
+          </div>
+
+          <!-- Audio Chunks -->
+          <div class="status-item">
+            <div class="status-item__label">Audio Chunks</div>
+            <div class="status-item__value" id="audioChunks">0</div>
+          </div>
+
+          <!-- Duration -->
+          <div class="status-item">
+            <div class="status-item__label">Session Duration</div>
+            <div class="status-item__value" id="sessionDuration">00:00</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+  </div><!-- end dg-columns -->
+</body>
+
 </html>

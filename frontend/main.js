@@ -1,490 +1,782 @@
-// DOM Elements
-const startButton = document.getElementById('startButton');
-const endButton = document.getElementById('endButton');
-const cancelButton = document.getElementById('cancelButton');
-const sendButton = document.getElementById('sendButton');
-const injectUserMessageInput = document.getElementById('injectUserMessageInput');
-const statusBanner = document.getElementById('statusBanner');
-const statusText = document.getElementById('statusText');
-const conversationHistory = document.getElementById('conversationHistory');
+/**
+ * Voice Agent Frontend
+ *
+ * Handles:
+ * - WebSocket connection to Deepgram Voice Agent
+ * - Microphone capture and audio streaming
+ * - Audio playback of agent responses
+ * - Chat interface and message handling
+ * - Real-time status updates
+ */
 
-// Browser detection
-const isFirefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1;
+// ============================================================================
+// STATE MANAGEMENT
+// ============================================================================
 
-// State
-let socket = null;
-let mediaStream = null;
-let audioContext = null;
-let processor = null;
-let isConnected = false;
-let isRecording = false;
-let startTime = 0;
-let scheduledAudioSources = [];
+const state = {
+  ws: null,
+  isConnected: false,
+  audioContext: null,
+  mediaStream: null,
+  audioProcessor: null,
+  audioQueue: [],
+  isPlaying: false,
+  stats: {
+    messagesSent: 0,
+    messagesReceived: 0,
+    audioChunks: 0,
+    sessionStart: null,
+  },
+  config: {
+    listenModel: 'nova-2',
+    speakModel: 'aura-asteria-en',
+    thinkModel: 'gpt-4o-mini',
+    systemPrompt: 'You are a helpful assistant.',
+  },
+  // Track original config when connected to detect changes
+  originalConfig: null,
+  hasUnsavedChanges: false,
+};
 
-// Update status display
-function updateStatus(status, message) {
-  // Update status banner
-  statusBanner.className = 'dg-status';
+// ============================================================================
+// DOM ELEMENTS
+// ============================================================================
 
-  if (status === 'connected') {
-    statusBanner.classList.add('dg-status--success');
-    startButton.disabled = true;
-    endButton.disabled = false;
-    sendButton.disabled = false;
-    injectUserMessageInput.disabled = false;
-  } else if (status === 'disconnected') {
-    statusBanner.classList.add('dg-status--error');
-    startButton.disabled = false;
-    endButton.disabled = true;
-    sendButton.disabled = true;
-    injectUserMessageInput.disabled = true;
-  } else if (status === 'connecting') {
-    statusBanner.classList.add('dg-status--info');
-    startButton.disabled = true;
-    endButton.disabled = true;
-    sendButton.disabled = true;
-    injectUserMessageInput.disabled = true;
-  } else if (status === 'error') {
-    statusBanner.classList.add('dg-status--error');
-    startButton.disabled = false;
-    endButton.disabled = true;
-    sendButton.disabled = true;
-    injectUserMessageInput.disabled = true;
-  }
+const elements = {
+  // Forms and controls
+  configForm: null,
+  connectBtn: null,
+  disconnectBtn: null,
+  disconnectContainer: null,
+  updateSettingsBtn: null,
+  listenModel: null,
+  speakModel: null,
+  thinkModel: null,
+  systemPrompt: null,
 
-  // Ensure statusText element exists and update message
-  // Always re-query to avoid stale reference after innerHTML changes
-  const currentStatusText = document.getElementById('statusText');
-  if (!currentStatusText) {
-    statusBanner.innerHTML = '<span id="statusText">' + message + '</span>';
-  } else {
-    currentStatusText.textContent = message;
-  }
+  // Chat interface
+  connectOverlay: null,
+  chatMessages: null,
+  messageInput: null,
+  sendBtn: null,
+
+  // Status display
+  connectionStatus: null,
+  agentState: null,
+  micStatus: null,
+  messagesSent: null,
+  messagesReceived: null,
+  audioChunks: null,
+  sessionDuration: null,
+};
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
+document.addEventListener('DOMContentLoaded', () => {
+  initializeElements();
+  initializeEventListeners();
+  updateSessionDuration();
+});
+
+function initializeElements() {
+  // Config form
+  elements.configForm = document.getElementById('configForm');
+  elements.connectBtn = document.getElementById('connectBtn');
+  elements.disconnectBtn = document.getElementById('disconnectBtn');
+  elements.disconnectContainer = document.getElementById('disconnectContainer');
+  elements.updateSettingsBtn = document.getElementById('updateSettingsBtn');
+  elements.listenModel = document.getElementById('listenModel');
+  elements.speakModel = document.getElementById('speakModel');
+  elements.thinkModel = document.getElementById('thinkModel');
+  elements.systemPrompt = document.getElementById('systemPrompt');
+
+  // Chat interface
+  elements.connectOverlay = document.getElementById('connectOverlay');
+  elements.chatMessages = document.getElementById('chatMessages');
+  elements.messageInput = document.getElementById('messageInput');
+  elements.sendBtn = document.getElementById('sendBtn');
+
+  // Status
+  elements.connectionStatus = document.getElementById('connectionStatus');
+  elements.agentState = document.getElementById('agentState');
+  elements.micStatus = document.getElementById('micStatus');
+  elements.messagesSent = document.getElementById('messagesSent');
+  elements.messagesReceived = document.getElementById('messagesReceived');
+  elements.audioChunks = document.getElementById('audioChunks');
+  elements.sessionDuration = document.getElementById('sessionDuration');
 }
 
-// Add message to conversation history
-function addMessage(role, content) {
-  const messageDiv = document.createElement('div');
-  messageDiv.className = `message ${role}`;
+function initializeEventListeners() {
+  // Connect button
+  elements.connectBtn.addEventListener('click', connect);
 
-  const roleDiv = document.createElement('div');
-  roleDiv.className = 'role';
-  roleDiv.textContent = role === 'user' ? 'You:' : 'Agent:';
+  // Disconnect button
+  elements.disconnectBtn.addEventListener('click', disconnect);
 
-  const contentDiv = document.createElement('div');
-  contentDiv.className = 'content';
-  contentDiv.textContent = content;
+  // Update settings button
+  elements.updateSettingsBtn.addEventListener('click', updateSettings);
 
-  const timestampDiv = document.createElement('div');
-  timestampDiv.className = 'timestamp';
-  timestampDiv.textContent = new Date().toLocaleTimeString();
+  // Track changes in config inputs
+  elements.listenModel.addEventListener('change', onConfigChange);
+  elements.speakModel.addEventListener('change', onConfigChange);
+  elements.thinkModel.addEventListener('change', onConfigChange);
+  elements.systemPrompt.addEventListener('input', onConfigChange);
 
-  messageDiv.appendChild(roleDiv);
-  messageDiv.appendChild(contentDiv);
-  messageDiv.appendChild(timestampDiv);
-
-  conversationHistory.appendChild(messageDiv);
-  conversationHistory.scrollTop = conversationHistory.scrollHeight;
-}
-
-// Convert Float32 PCM to Int16 PCM
-function convertFloatToPcm(floatData) {
-  const pcmData = new Int16Array(floatData.length);
-  for (let i = 0; i < floatData.length; i++) {
-    const s = Math.max(-1, Math.min(1, floatData[i]));
-    pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-  }
-  return pcmData;
-}
-
-
-// Play audio with scheduled timing (eliminates gaps between packets)
-async function playAudio(audioData) {
-  if (!audioContext) return;
-
-  try {
-    if (audioContext.state === 'suspended') {
-      await audioContext.resume();
-    }
-
-    const audioDataView = new Int16Array(audioData);
-
-    if (audioDataView.length === 0) {
-      console.error('Received audio data is empty.');
-      return;
-    }
-
-    // Create buffer with correct sample rate for agent's audio (24000Hz)
-    const audioBuffer = audioContext.createBuffer(1, audioDataView.length, 24000);
-    const audioBufferChannel = audioBuffer.getChannelData(0);
-
-    // Convert Int16 to Float32
-    for (let i = 0; i < audioDataView.length; i++) {
-      audioBufferChannel[i] = audioDataView[i] / 32768;
-    }
-
-    // Create and configure source
-    const source = audioContext.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(audioContext.destination);
-
-    // Schedule audio at precise time to eliminate gaps
-    const currentTime = audioContext.currentTime;
-    if (startTime < currentTime) {
-      startTime = currentTime;
-    }
-
-    source.start(startTime);
-
-    // Update start time for next audio packet (seamless queueing)
-    startTime = startTime + audioBuffer.duration;
-    scheduledAudioSources.push(source);
-  } catch (error) {
-    console.error('Error playing audio:', error);
-  }
-}
-
-// Clear all scheduled audio (called when user interrupts)
-function clearScheduledAudio() {
-  if (!audioContext) return;
-
-  scheduledAudioSources.forEach((source) => {
-    try {
-      source.stop();
-      source.onended = null;
-    } catch (e) {
-      // Source may have already ended or not started yet
+  // Send message
+  elements.sendBtn.addEventListener('click', sendTextMessage);
+  elements.messageInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendTextMessage();
     }
   });
-  scheduledAudioSources = [];
 
-  const scheduledAudioMs = Math.round(
-    1000 * (startTime - audioContext.currentTime)
-  );
-  if (scheduledAudioMs > 0) {
-    console.log(`Cleared ${scheduledAudioMs}ms of scheduled audio`);
-  }
-
-  startTime = 0;
+  // Microphone button removed - mic opens automatically on connect
 }
 
-// Start audio streaming to server
-async function startStreaming() {
-  if (!mediaStream || !isConnected) return;
+// ============================================================================
+// CONFIGURATION CHANGE TRACKING
+// ============================================================================
 
-  try {
-    // Resume AudioContext if suspended (especially important for Firefox)
-    if (audioContext.state === 'suspended') {
-      await audioContext.resume();
-      if (isFirefox) {
-        // Give Firefox a moment to fully initialize
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-    }
+function onConfigChange() {
+  if (!state.isConnected || !state.originalConfig) return;
 
-    const source = audioContext.createMediaStreamSource(mediaStream);
+  // Check if any values have changed
+  const hasChanges =
+    elements.listenModel.value !== state.originalConfig.listenModel ||
+    elements.speakModel.value !== state.originalConfig.speakModel ||
+    elements.thinkModel.value !== state.originalConfig.thinkModel ||
+    elements.systemPrompt.value !== state.originalConfig.systemPrompt;
 
-    // Create audio processor
-    const bufferSize = 2048;
-    processor = audioContext.createScriptProcessor(bufferSize, 1, 1);
-
-    source.connect(processor);
-    processor.connect(audioContext.destination);
-
-    let lastSendTime = 0;
-    const sendInterval = 100; // Send every 100ms
-
-    processor.onaudioprocess = (e) => {
-      const now = Date.now();
-      if (socket?.readyState === WebSocket.OPEN && now - lastSendTime >= sendInterval) {
-        const inputData = e.inputBuffer.getChannelData(0);
-        const pcmData = convertFloatToPcm(inputData);
-        socket.send(pcmData.buffer);
-        lastSendTime = now;
-      }
-    };
-
-    isRecording = true;
-  } catch (error) {
-    console.error('Error starting audio stream:', error);
-    updateStatus('error', 'ERROR: ' + error.message);
-  }
+  state.hasUnsavedChanges = hasChanges;
+  elements.updateSettingsBtn.disabled = !hasChanges;
 }
 
-// Stop audio streaming
-function stopStreaming() {
-  isRecording = false;
+function updateSettings() {
+  if (!state.isConnected || !state.hasUnsavedChanges) return;
 
-  if (processor) {
-    processor.disconnect();
-    processor = null;
+  const currentConfig = {
+    listenModel: elements.listenModel.value,
+    speakModel: elements.speakModel.value,
+    thinkModel: elements.thinkModel.value,
+    systemPrompt: elements.systemPrompt.value,
+  };
+
+  // Send update messages for each changed setting
+  if (currentConfig.listenModel !== state.originalConfig.listenModel) {
+    sendMessage({
+      type: 'UpdateListen',
+      provider: {
+        type: 'deepgram',
+        version: 'v1',
+        model: currentConfig.listenModel,
+      },
+    });
+    addSystemMessage('🎧 Updating speech recognition...');
   }
 
-  if (audioContext) {
-    audioContext.close();
-    audioContext = null;
+  if (currentConfig.speakModel !== state.originalConfig.speakModel) {
+    sendMessage({
+      type: 'UpdateSpeak',
+      provider: {
+        type: 'deepgram',
+        model: currentConfig.speakModel,
+      },
+    });
+    addSystemMessage('🔊 Updating voice model...');
   }
 
-  if (mediaStream) {
-    mediaStream.getTracks().forEach(track => track.stop());
-    mediaStream = null;
+  if (currentConfig.thinkModel !== state.originalConfig.thinkModel ||
+      currentConfig.systemPrompt !== state.originalConfig.systemPrompt) {
+    sendMessage({
+      type: 'UpdateThink',
+      provider: {
+        type: 'open_ai',
+        model: currentConfig.thinkModel,
+      },
+      prompt: currentConfig.systemPrompt,
+    });
+    addSystemMessage('🧠 Updating LLM configuration...');
   }
+
+  // Update original config
+  state.originalConfig = { ...currentConfig };
+  state.config = { ...currentConfig };
+  state.hasUnsavedChanges = false;
+  elements.updateSettingsBtn.disabled = true;
 }
 
-// Connect to WebSocket
+// ============================================================================
+// WEBSOCKET CONNECTION
+// ============================================================================
+
 async function connect() {
+  if (state.isConnected) return;
+
+  // Get configuration from form
+  state.config.listenModel = elements.listenModel.value;
+  state.config.speakModel = elements.speakModel.value;
+  state.config.thinkModel = elements.thinkModel.value;
+  state.config.systemPrompt = elements.systemPrompt.value;
+
+  // Update UI
+  elements.connectBtn.disabled = true;
+  elements.connectBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Connecting...';
+
   try {
-    updateStatus('connecting', 'CONNECTING');
-
-    // Create audio context
-    // Firefox: Use native sample rate to avoid mismatch error
-    // Chrome/Safari: Use 16000 Hz for microphone input
-    if (isFirefox) {
-      audioContext = new AudioContext({
-      });
-    } else {
-      audioContext = new AudioContext({
-        sampleRate: 16000,
-        latencyHint: 'interactive' // Optimize for low latency real-time audio
-      });
-    }
-
-    // Browser-specific audio constraints
-    let audioConstraints;
-
-    if (isFirefox) {
-      audioConstraints = {
-        channelCount: 1, // Force 1 channel for microphone input, mono recommended for better audio quality (not guaranteed in Firefox)
-        echoCancellation: true, // set to true for desktop microphones also works with headsets
-        noiseSuppression: false, // firefox ignores this
-      };
-    } else {
-      // Chrome/Edge/Safari: Full constraints with Google-specific options
-      audioConstraints = {
-        channelCount: 1, // Force 1 channel for microphone input, mono recommended for better audio quality
-        echoCancellation: true, // set to true for desktop microphones also works with headsets
-        noiseSuppression: true, // set to true for desktop microphones also works with headsets
-      };
-    }
-
-    const constraints = {
-      audio: audioConstraints
-    };
-
-    mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-
-    updateStatus('connecting', 'CONNECTING');
-
     // Connect to WebSocket
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/agent/converse`;
-    socket = new WebSocket(wsUrl);
 
-    // Set binary type - some browsers work better with 'blob', others with 'arraybuffer'
-    // We handle both in onmessage for maximum compatibility
-    socket.binaryType = 'arraybuffer';
+    state.ws = new WebSocket(wsUrl);
+    state.ws.binaryType = 'arraybuffer';
 
-    socket.onopen = () => {
-      console.log('WebSocket connected');
-      isConnected = true;
-      // Don't update status here - wait for Welcome message
-    };
-
-    socket.onmessage = async (event) => {
-      // Handle both Blob and ArrayBuffer for better browser compatibility
-      if (event.data instanceof Blob) {
-        // Binary audio data as Blob (some browsers send as Blob)
-        try {
-          const arrayBuffer = await event.data.arrayBuffer();
-          playAudio(arrayBuffer);
-        } catch (error) {
-          console.error('Error processing audio response:', error);
-        }
-      } else if (event.data instanceof ArrayBuffer) {
-        // Binary audio data as ArrayBuffer (direct binary)
-        try {
-          playAudio(event.data);
-        } catch (error) {
-          console.error('Error processing audio:', error);
-        }
-      } else {
-        // JSON message
-        try {
-          const message = JSON.parse(event.data);
-          console.log('Received message:', message);
-
-          if (message.type === 'Welcome') {
-            updateStatus('connected', 'CONNECTED');
-
-            // Send Settings message
-            const settings = {
-              type: 'Settings',
-              audio: {
-                input: {
-                  encoding: 'linear16',
-                  sample_rate: audioContext.sampleRate // Use actual AudioContext rate
-                },
-                output: {
-                  encoding: 'linear16',
-                  sample_rate: 24000, // Keep output at 24000 for all browsers
-                  container: 'none' // Request raw PCM without container/headers for manual audio processing
-                }
-              },
-              agent: {
-                listen: {
-                  provider: {
-                    type: 'deepgram',
-                    model: 'nova-3'
-                  }
-                },
-                think: {
-                  provider: {
-                    type: 'open_ai',
-                    model: 'gpt-4o-mini'
-                  },
-                  prompt: `You are a helpful voice assistant created by Deepgram. Your responses should be friendly, human-like, and conversational. Always keep your answers concise, limited to 1-2 sentences and no more than 120 characters.
-
-When responding to a user's message, follow these guidelines:
-- If the user's message is empty, respond with an empty message.
-- Ask follow-up questions to engage the user, but only one question at a time.
-- Keep your responses unique and avoid repetition.
-- If a question is unclear or ambiguous, ask for clarification before answering.
-- If asked about your well-being, provide a brief response about how you're feeling.
-
-Remember that you have a voice interface. You can listen and speak, and all your responses will be spoken aloud.`
-                },
-                speak: {
-                  provider: {
-                    type: 'deepgram',
-                    model: 'aura-2-luna-en'
-                  }
-                },
-                greeting: "Hello! How can I help you today?"
-              }
-            };
-
-            socket.send(JSON.stringify(settings));
-          } else if (message.type === 'SettingsApplied') {
-            updateStatus('connected', 'CONNECTED');
-            startStreaming();
-          } else if (message.type === 'ConversationText') {
-            // Add message to conversation history
-            addMessage(message.role, message.content);
-          } else if (message.type === 'Error') {
-            console.error('Agent error:', message);
-            updateStatus('error', 'ERROR: ' + message.description);
-          } else if (message.type === 'UserStartedSpeaking') {
-            updateStatus('connected', 'CONNECTED');
-          } else if (message.type === 'AgentThinking') {
-            updateStatus('connected', 'CONNECTED');
-          } else if (message.type === 'AgentAudioDone') {
-            updateStatus('connected', 'CONNECTED');
-          } else if (message.type === 'InjectionRefused') {
-            console.warn('Message injection was refused - user may be speaking or agent responding');
-            updateStatus('connected', 'CONNECTED - Message not sent (agent is speaking or user is talking)');
-            // Auto-clear the status message after 3 seconds
-            setTimeout(() => {
-              updateStatus('connected', 'CONNECTED');
-            }, 3000);
-          }
-        } catch (error) {
-          console.error('Error parsing message:', error);
-        }
-      }
-    };
-
-    socket.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      updateStatus('error', 'ERROR: Connection error');
-      disconnect();
-    };
-
-    socket.onclose = () => {
-      console.log('WebSocket closed');
-      isConnected = false;
-      updateStatus('disconnected', 'DISCONNECTED');
-      disconnect();
-    };
+    state.ws.onopen = handleWebSocketOpen;
+    state.ws.onmessage = handleWebSocketMessage;
+    state.ws.onclose = handleWebSocketClose;
+    state.ws.onerror = handleWebSocketError;
 
   } catch (error) {
-    console.error('Error connecting:', error);
-    updateStatus('error', 'ERROR: ' + error.message);
-    disconnect();
+    console.error('Connection error:', error);
+    showError('Failed to connect to server');
+    // Reset button state
+    elements.connectBtn.disabled = false;
+    elements.connectBtn.innerHTML = '<i class="fa-solid fa-plug"></i> Connect';
   }
 }
 
-// Disconnect
-function disconnect() {
-  stopStreaming();
-  clearScheduledAudio();
-
-  if (socket) {
-    socket.close();
-    socket = null;
-  }
-
-  isConnected = false;
-  updateStatus('disconnected', 'DISCONNECTED');
+function handleWebSocketOpen() {
+  console.log('WebSocket connected, waiting for Welcome message...');
+  updateAgentState('Connecting...');
 }
 
-// Clear conversation history
-function clearConversation() {
-  conversationHistory.innerHTML = '';
+function handleWebSocketMessage(event) {
+  // Try to parse as JSON first
+  if (typeof event.data === 'string' || event.data instanceof ArrayBuffer) {
+    try {
+      const text = typeof event.data === 'string'
+        ? event.data
+        : new TextDecoder().decode(event.data);
+      const message = JSON.parse(text);
+      // Count JSON messages only
+      state.stats.messagesReceived++;
+      updateStats();
+      handleJSONMessage(message);
+      return;
+    } catch (e) {
+      // Not JSON, must be binary audio
+      handleBinaryAudio(event.data);
+    }
+  }
 }
 
-// Button click handlers
-startButton.addEventListener('click', () => {
-  if (!isConnected) {
-    connect();
-  }
-});
+function handleJSONMessage(message) {
+  console.log('Received:', message.type);
 
-endButton.addEventListener('click', () => {
-  if (isConnected) {
-    disconnect();
-  }
-});
+  switch (message.type) {
+    case 'Welcome':
+      addSystemMessage('✓ WebSocket connected');
+      sendSettings();
+      break;
 
-cancelButton.addEventListener('click', () => {
+    case 'SettingsApplied':
+      addSystemMessage('✓ Configuration applied');
+      onConnected();
+      break;
+
+    case 'ConversationText':
+      // Display conversation text in chat
+      if (message.role === 'assistant' && message.content) {
+        addChatMessage('agent', message.content);
+      } else if (message.role === 'user' && message.content) {
+        addChatMessage('user', message.content);
+      }
+      break;
+
+    case 'UserStartedSpeaking':
+      updateAgentState('Listening...');
+      break;
+
+    case 'AgentThinking':
+      addSystemMessage('💭 Agent is thinking...');
+      updateAgentState('Thinking...');
+      break;
+
+    case 'AgentStartedSpeaking':
+      updateAgentState('Speaking...');
+      break;
+
+    case 'AgentAudioDone':
+      updateAgentState('Ready');
+      break;
+
+    case 'FunctionCallRequest':
+      addSystemMessage('🔧 Function call requested');
+      updateAgentState('Calling function...');
+      break;
+
+    case 'FunctionCallResponse':
+      addSystemMessage('✓ Function call completed');
+      break;
+
+    case 'PromptUpdated':
+      addSystemMessage('✓ System prompt updated');
+      break;
+
+    case 'SpeakUpdated':
+      addSystemMessage('✓ Voice configuration updated');
+      break;
+
+    case 'Warning':
+      console.warn('Agent warning:', message);
+      addSystemMessage(`⚠️ ${message.description || 'Warning from agent'}`, 'warning');
+      break;
+
+    case 'Error':
+      console.error('Agent error:', message);
+      addSystemMessage(`❌ ${message.description || 'An error occurred'}`, 'error');
+      showError(message.description || 'Agent error occurred');
+
+      // Handle timeout errors by disconnecting
+      if (message.code === 'CLIENT_MESSAGE_TIMEOUT') {
+        disconnect();
+      } else {
+        updateAgentState('Error');
+      }
+      break;
+
+    default:
+      console.log('Unhandled message type:', message.type, message);
+  }
+}
+
+function handleBinaryAudio(arrayBuffer) {
+  state.stats.audioChunks++;
+  updateStats();
+
+  // Queue audio for playback
+  state.audioQueue.push(arrayBuffer);
+
+  // Start playback if not already playing
+  if (!state.isPlaying) {
+    playNextAudio();
+  }
+}
+
+function handleWebSocketClose(event) {
+  console.log('WebSocket closed:', event.code, event.reason);
   disconnect();
-  clearConversation();
-});
+}
 
-sendButton.addEventListener('click', () => {
-  sendTextMessage();
-});
+function handleWebSocketError(error) {
+  console.error('WebSocket error:', error);
+  showError('WebSocket connection error');
+}
 
-// Send text message via Enter key
-injectUserMessageInput.addEventListener('keypress', (e) => {
-  if (e.key === 'Enter' && !sendButton.disabled) {
-    sendTextMessage();
+function sendSettings() {
+  const settingsMessage = {
+    type: 'Settings',
+    audio: {
+      input: {
+        encoding: 'linear16',
+        sample_rate: 16000,
+      },
+      output: {
+        encoding: 'linear16',
+        sample_rate: 16000,
+      },
+    },
+    agent: {
+      listen: {
+        provider: {
+          type: 'deepgram',
+          version: 'v1',
+          model: state.config.listenModel,
+        },
+      },
+      speak: {
+        provider: {
+          type: 'deepgram',
+          model: state.config.speakModel,
+        },
+      },
+      think: {
+        provider: {
+          type: 'open_ai',
+          model: state.config.thinkModel,
+        },
+        prompt: state.config.systemPrompt,
+      },
+    },
+  };
+
+  sendMessage(settingsMessage);
+  addSystemMessage('⚙️ Initializing voice agent...');
+  updateAgentState('Configuring...');
+}
+
+function sendMessage(message) {
+  if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+    state.ws.send(JSON.stringify(message));
+    state.stats.messagesSent++;
+    updateStats();
   }
-});
+}
 
-// Send text message to agent
-function sendTextMessage() {
-  const message = injectUserMessageInput.value.trim();
+async function onConnected() {
+  state.isConnected = true;
+  state.stats.sessionStart = Date.now();
 
-  if (!message || !socket || socket.readyState !== WebSocket.OPEN) {
+  // Store original config for change tracking
+  state.originalConfig = {
+    listenModel: elements.listenModel.value,
+    speakModel: elements.speakModel.value,
+    thinkModel: elements.thinkModel.value,
+    systemPrompt: elements.systemPrompt.value,
+  };
+
+  // Update UI
+  elements.connectOverlay.classList.add('hidden');
+  elements.disconnectContainer.classList.remove('hidden');
+  elements.updateSettingsBtn.classList.remove('hidden');
+  elements.updateSettingsBtn.disabled = true; // Disabled until changes made
+
+  // Enable controls
+  elements.messageInput.disabled = false;
+  elements.sendBtn.disabled = false;
+
+  // Config inputs stay enabled for live updates
+  // (no need to disable them)
+
+  // Update status
+  updateConnectionStatus(true);
+  updateAgentState('Requesting microphone...');
+
+  // Initialize audio context
+  await initializeAudioContext();
+
+  // Automatically open microphone
+  await startMicrophone();
+}
+
+function disconnect() {
+  // Close WebSocket
+  if (state.ws) {
+    state.ws.close();
+    state.ws = null;
+  }
+
+  // Stop microphone and audio processor
+  if (state.audioProcessor) {
+    state.audioProcessor.disconnect();
+    state.audioProcessor = null;
+  }
+  if (state.mediaStream) {
+    state.mediaStream.getTracks().forEach(track => track.stop());
+    state.mediaStream = null;
+  }
+
+  // Close audio context
+  if (state.audioContext) {
+    state.audioContext.close();
+    state.audioContext = null;
+  }
+
+  // Reset state completely
+  state.isConnected = false;
+  state.audioQueue = [];
+  state.isPlaying = false;
+  state.originalConfig = null;
+  state.hasUnsavedChanges = false;
+  state.stats = {
+    messagesSent: 0,
+    messagesReceived: 0,
+    audioChunks: 0,
+    sessionStart: null,
+  };
+
+  // Update UI
+  elements.connectOverlay.classList.remove('hidden');
+  elements.disconnectContainer.classList.add('hidden');
+  elements.updateSettingsBtn.classList.add('hidden');
+  elements.updateSettingsBtn.disabled = true;
+
+  // Reset connect button
+  elements.connectBtn.disabled = false;
+  elements.connectBtn.innerHTML = '<i class="fa-solid fa-plug"></i> Connect';
+
+  // Disable controls
+  elements.messageInput.disabled = true;
+  elements.messageInput.value = '';
+  elements.sendBtn.disabled = true;
+
+  // Clear chat messages
+  elements.chatMessages.innerHTML = '';
+
+  // Config inputs stay enabled
+  // (no need to change their state)
+
+  // Update status
+  updateConnectionStatus(false);
+  updateMicrophoneStatus(false);
+  updateAgentState('Idle');
+  updateStats();
+}
+
+// ============================================================================
+// AUDIO CONTEXT & PLAYBACK
+// ============================================================================
+
+async function initializeAudioContext() {
+  if (!state.audioContext) {
+    state.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+      sampleRate: 16000,
+    });
+  }
+}
+
+async function playNextAudio() {
+  if (state.audioQueue.length === 0) {
+    state.isPlaying = false;
     return;
   }
 
-  // Send InjectUserMessage to agent
-  const injectMessage = {
-    type: 'InjectUserMessage',
-    content: message
-  };
+  state.isPlaying = true;
+  const arrayBuffer = state.audioQueue.shift();
 
-  socket.send(JSON.stringify(injectMessage));
+  try {
+    if (!state.audioContext) {
+      await initializeAudioContext();
+    }
 
-  // Don't add to UI optimistically - wait for ConversationText event from Deepgram
-  // This prevents duplicate messages when Deepgram echoes back the user message
+    // Convert ArrayBuffer to AudioBuffer
+    const audioBuffer = await arrayBufferToAudioBuffer(arrayBuffer);
 
-  // Clear input
-  injectUserMessageInput.value = '';
+    // Play the audio
+    const source = state.audioContext.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(state.audioContext.destination);
+    source.onended = () => playNextAudio();
+    source.start(0);
+
+  } catch (error) {
+    console.error('Audio playback error:', error);
+    // Continue with next audio
+    playNextAudio();
+  }
 }
 
-// Cleanup on page unload
-window.addEventListener('beforeunload', () => {
-  disconnect();
-});
+async function arrayBufferToAudioBuffer(arrayBuffer) {
+  // Convert raw PCM16 to AudioBuffer
+  const pcm16 = new Int16Array(arrayBuffer);
+  const audioBuffer = state.audioContext.createBuffer(
+    1, // mono
+    pcm16.length,
+    16000 // sample rate
+  );
+
+  const channelData = audioBuffer.getChannelData(0);
+  for (let i = 0; i < pcm16.length; i++) {
+    channelData[i] = pcm16[i] / 32768; // Convert to float [-1, 1]
+  }
+
+  return audioBuffer;
+}
+
+// ============================================================================
+// MICROPHONE CAPTURE
+// ============================================================================
+
+async function startMicrophone() {
+  if (!state.isConnected || state.mediaStream) return;
+
+  // Set a timeout for microphone permission
+  const timeoutId = setTimeout(() => {
+    if (!state.mediaStream) {
+      console.error('Microphone permission timeout');
+      addSystemMessage('❌ Microphone access timed out', 'error');
+      showError('Please allow microphone access and try again');
+      disconnect();
+    }
+  }, 10000); // 10 second timeout
+
+  try {
+    // Get microphone access
+    state.mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        sampleRate: 16000,
+        echoCancellation: true,
+        noiseSuppression: true,
+      },
+    });
+
+    // Clear timeout since we got permission
+    clearTimeout(timeoutId);
+
+    // Create audio processing pipeline
+    if (!state.audioContext) {
+      await initializeAudioContext();
+    }
+
+    const source = state.audioContext.createMediaStreamSource(state.mediaStream);
+    state.audioProcessor = state.audioContext.createScriptProcessor(4096, 1, 1);
+
+    state.audioProcessor.onaudioprocess = (e) => {
+      if (!state.isConnected) return;
+
+      const inputData = e.inputBuffer.getChannelData(0);
+
+      // Convert float32 to int16
+      const pcm16 = new Int16Array(inputData.length);
+      for (let i = 0; i < inputData.length; i++) {
+        const s = Math.max(-1, Math.min(1, inputData[i]));
+        pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+
+      // Send binary audio to WebSocket
+      if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+        state.ws.send(pcm16.buffer);
+      }
+    };
+
+    source.connect(state.audioProcessor);
+    state.audioProcessor.connect(state.audioContext.destination);
+
+    // Agent is now ready to use
+    updateMicrophoneStatus(true);
+    updateAgentState('Ready');
+    addSystemMessage('🎤 Microphone active - ready to talk');
+    console.log('Microphone opened, voice agent ready');
+
+  } catch (error) {
+    clearTimeout(timeoutId);
+    console.error('Microphone error:', error);
+    addSystemMessage('❌ Microphone access denied', 'error');
+    showError('Please allow microphone access and try again');
+    disconnect();
+  }
+}
+
+// ============================================================================
+// CHAT INTERFACE
+// ============================================================================
+
+function sendTextMessage() {
+  const text = elements.messageInput.value.trim();
+  if (!text || !state.isConnected) return;
+
+  // Send InjectUserMessage
+  const message = {
+    type: 'InjectUserMessage',
+    content: text,
+  };
+
+  sendMessage(message);
+
+  // Clear input
+  elements.messageInput.value = '';
+  elements.messageInput.style.height = 'auto';
+}
+
+function addChatMessage(sender, text) {
+  const messageDiv = document.createElement('div');
+  messageDiv.className = `chat-message chat-message--${sender}`;
+
+  const avatar = document.createElement('div');
+  avatar.className = 'chat-message__avatar';
+  avatar.innerHTML = sender === 'agent'
+    ? '<i class="fa-solid fa-robot"></i>'
+    : '<i class="fa-solid fa-user"></i>';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-message__bubble';
+  bubble.textContent = text;
+
+  messageDiv.appendChild(avatar);
+  messageDiv.appendChild(bubble);
+
+  elements.chatMessages.appendChild(messageDiv);
+
+  // Scroll to bottom
+  elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+}
+
+function addSystemMessage(text, type = 'info') {
+  const messageDiv = document.createElement('div');
+  messageDiv.className = 'chat-message--system';
+  messageDiv.textContent = text;
+
+  if (type === 'error') {
+    messageDiv.style.color = 'var(--dg-error, #ff4444)';
+  } else if (type === 'warning') {
+    messageDiv.style.color = 'var(--dg-warning, #ffa500)';
+  }
+
+  elements.chatMessages.appendChild(messageDiv);
+
+  // Scroll to bottom
+  elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+}
+
+// ============================================================================
+// UI UPDATES
+// ============================================================================
+
+function updateConnectionStatus(connected) {
+  if (connected) {
+    elements.connectionStatus.className = 'status-badge status-badge--connected';
+    elements.connectionStatus.innerHTML = `
+      <span class="status-indicator status-indicator--connected"></span>
+      Connected
+    `;
+  } else {
+    elements.connectionStatus.className = 'status-badge status-badge--disconnected';
+    elements.connectionStatus.innerHTML = `
+      <span class="status-indicator status-indicator--disconnected"></span>
+      Disconnected
+    `;
+  }
+}
+
+function updateAgentState(stateName) {
+  elements.agentState.textContent = stateName;
+}
+
+function updateMicrophoneStatus(active) {
+  if (active) {
+    elements.micStatus.textContent = 'Active';
+    elements.micStatus.classList.add('status-item__value--success');
+  } else {
+    elements.micStatus.textContent = 'Inactive';
+    elements.micStatus.classList.remove('status-item__value--success');
+  }
+}
+
+function updateStats() {
+  elements.messagesSent.textContent = state.stats.messagesSent;
+  elements.messagesReceived.textContent = state.stats.messagesReceived;
+  elements.audioChunks.textContent = state.stats.audioChunks;
+}
+
+function updateSessionDuration() {
+  if (state.stats.sessionStart) {
+    const elapsed = Math.floor((Date.now() - state.stats.sessionStart) / 1000);
+    const minutes = Math.floor(elapsed / 60);
+    const seconds = elapsed % 60;
+    elements.sessionDuration.textContent =
+      `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  } else {
+    elements.sessionDuration.textContent = '00:00';
+  }
+
+  // Update every second
+  setTimeout(updateSessionDuration, 1000);
+}
+
+function showError(message) {
+  console.error(message);
+  // Could add a toast notification here
+}
