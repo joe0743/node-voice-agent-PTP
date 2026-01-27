@@ -1,25 +1,19 @@
 /**
  * Node Voice Agent Starter - Backend Server
  *
- * This is a simple Express server that provides a voice agent API endpoint
- * powered by Deepgram's Voice Agent service. It's designed to be easily
- * modified and extended for your own projects.
- *
- * Key Features:
- * - Single API endpoint: POST /agent/converse
- * - Proxies to Vite dev server in development
- * - Serves static frontend in production
- * - Creates a WebSocket server for the voice agent
+ * Simple WebSocket proxy to Deepgram's Voice Agent API.
+ * Forwards all messages (JSON and binary) bidirectionally between client and Deepgram.
  */
 
-import { createClient } from '@deepgram/sdk';
-import { WebSocketServer } from 'ws';
+import { WebSocketServer, WebSocket } from 'ws';
 import express from 'express';
 import { createServer } from 'http';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
+import toml from 'toml';
 
 // Load environment variables
 dotenv.config();
@@ -30,7 +24,8 @@ const __dirname = path.dirname(__filename);
 // Configuration
 const CONFIG = {
   deepgramApiKey: process.env.DEEPGRAM_API_KEY,
-  port: process.env.PORT || 3000,
+  deepgramAgentUrl: 'wss://agent.deepgram.com/v1/agent/converse',
+  port: process.env.PORT || 8080,
   host: process.env.HOST || '0.0.0.0',
   vitePort: process.env.VITE_PORT || 5173,
   isDevelopment: process.env.NODE_ENV === 'development',
@@ -44,6 +39,31 @@ if (!CONFIG.deepgramApiKey) {
 
 // Initialize Express
 const app = express();
+app.use(express.json());
+
+// Metadata endpoint - returns info from deepgram.toml
+app.get('/metadata', (req, res) => {
+  try {
+    const tomlPath = path.join(__dirname, 'deepgram.toml');
+    const tomlContent = fs.readFileSync(tomlPath, 'utf-8');
+    const config = toml.parse(tomlContent);
+
+    if (!config.meta) {
+      return res.status(500).json({
+        error: 'INTERNAL_SERVER_ERROR',
+        message: 'Missing [meta] section in deepgram.toml'
+      });
+    }
+
+    res.json(config.meta);
+  } catch (error) {
+    console.error('Error reading metadata:', error);
+    res.status(500).json({
+      error: 'INTERNAL_SERVER_ERROR',
+      message: 'Failed to read metadata from deepgram.toml'
+    });
+  }
+});
 
 // Development: Proxy to Vite dev server
 // Production: Serve static files
@@ -66,250 +86,101 @@ if (CONFIG.isDevelopment) {
 // Create HTTP server
 const server = createServer(app);
 
-// Create WebSocket server with path filtering
+// Create WebSocket server for agent endpoint
 const wss = new WebSocketServer({
   server,
   path: '/agent/converse'
 });
 
-// Handle WebSocket connections
-wss.on('connection', async (clientWs) => {
+// Handle WebSocket connections - simple pass-through proxy
+wss.on('connection', async (clientWs, request) => {
   console.log('Client connected to /agent/converse');
 
-  let deepgramAgent = null;
-
   try {
-    // Validate API key exists
-    if (!CONFIG.deepgramApiKey) {
+    // Extract API key from Sec-WebSocket-Protocol header or use server's key
+    const protocol = request.headers['sec-websocket-protocol'];
+    const apiKey = protocol || CONFIG.deepgramApiKey;
+
+    if (!apiKey) {
       clientWs.send(JSON.stringify({
         type: 'Error',
-        description: 'Missing Deepgram API key',
+        description: 'Missing API key',
         code: 'MISSING_API_KEY'
       }));
       clientWs.close();
       return;
     }
 
-    // Initialize Deepgram client
-    const deepgram = createClient(CONFIG.deepgramApiKey);
-
-    // Create agent connection (SDK will establish WebSocket to Deepgram)
-    const agent = deepgram.agent();
-
-    // Assign to outer scope variable for use in other handlers
-    deepgramAgent = agent;
-
-    // Forward Welcome message from Deepgram to client
-    agent.on('Welcome', (data) => {
-      if (clientWs.readyState === 1) {
-        clientWs.send(JSON.stringify(data));
+    // Create raw WebSocket connection to Deepgram Agent API
+    // Send API key via Authorization header
+    const deepgramWs = new WebSocket(CONFIG.deepgramAgentUrl, {
+      headers: {
+        'Authorization': `Token ${apiKey}`
       }
     });
 
-    // Forward SettingsApplied message from Deepgram to client
-    agent.on('SettingsApplied', (data) => {
-      if (clientWs.readyState === 1) {
-        clientWs.send(JSON.stringify(data));
+    // Forward all messages from Deepgram to client
+    deepgramWs.on('open', () => {
+      console.log('Connected to Deepgram Agent API');
+    });
+
+    deepgramWs.on('message', (data, isBinary) => {
+      if (clientWs.readyState === WebSocket.OPEN) {
+        clientWs.send(data, { binary: isBinary });
       }
     });
 
-    // Forward ConversationText events from Deepgram to client
-    agent.on('ConversationText', (data) => {
-      if (clientWs.readyState === 1) {
-        clientWs.send(JSON.stringify(data));
-      }
-    });
-
-    // Forward UserStartedSpeaking events from Deepgram to client
-    agent.on('UserStartedSpeaking', (data) => {
-      if (clientWs.readyState === 1) {
-        clientWs.send(JSON.stringify(data));
-      }
-    });
-
-    // Forward AgentThinking events from Deepgram to client
-    agent.on('AgentThinking', (data) => {
-      if (clientWs.readyState === 1) {
-        clientWs.send(JSON.stringify(data));
-      }
-    });
-
-    // Forward AgentAudioDone events from Deepgram to client
-    agent.on('AgentAudioDone', (data) => {
-      if (clientWs.readyState === 1) {
-        clientWs.send(JSON.stringify(data));
-      }
-    });
-
-    // Forward audio chunks from Deepgram to client
-    agent.on('Audio', (audioData) => {
-      if (clientWs.readyState === 1) {
-        clientWs.send(audioData, { binary: true });
-      }
-    });
-
-    // Forward Error events from Deepgram to client
-    agent.on('Error', (error) => {
-      console.error('Deepgram agent error:', error);
-      if (clientWs.readyState === 1) {
-        // Map Deepgram errors to our error codes
-        let errorCode = 'PROVIDER_ERROR';
-        if (error.message && error.message.includes('auth')) {
-          errorCode = 'MISSING_API_KEY';
-        } else if (error.message && error.message.includes('audio')) {
-          errorCode = 'AUDIO_FORMAT_ERROR';
-        }
-
+    deepgramWs.on('error', (error) => {
+      console.error('Deepgram WebSocket error:', error);
+      if (clientWs.readyState === WebSocket.OPEN) {
         clientWs.send(JSON.stringify({
           type: 'Error',
-          description: error.message || 'Unknown error occurred',
-          code: error.code || errorCode
+          description: error.message || 'Deepgram connection error',
+          code: 'PROVIDER_ERROR'
         }));
       }
     });
 
-    // Forward Warning events from Deepgram to client
-    agent.on('Warning', (data) => {
-      if (clientWs.readyState === 1) {
-        clientWs.send(JSON.stringify(data));
+    deepgramWs.on('close', (code, reason) => {
+      console.log(`Deepgram connection closed: ${code} ${reason}`);
+      if (clientWs.readyState === WebSocket.OPEN) {
+        // Use valid close code or default to 1000
+        // Reserved codes (1004, 1005, 1006, 1015) cannot be set by application
+        const reservedCodes = [1004, 1005, 1006, 1015];
+        const closeCode = (typeof code === 'number' && code >= 1000 && code <= 4999 && !reservedCodes.includes(code)) ? code : 1000;
+        clientWs.close(closeCode, reason);
       }
     });
 
-    // Forward InjectionRefused events from Deepgram to client
-    agent.on('InjectionRefused', (data) => {
-      if (clientWs.readyState === 1) {
-        clientWs.send(JSON.stringify(data));
-      }
-    });
-
-    // Handle agent close
-    agent.on('Close', () => {
-      console.log('Deepgram agent connection closed');
-      if (clientWs.readyState === 1) {
-        clientWs.close();
-      }
-    });
-
-    // Handle messages from client
-    clientWs.on('message', async (data, isBinary) => {
-      try {
-        if (!deepgramAgent) {
-          console.error('Deepgram agent not initialized');
-          return;
-        }
-
-        if (isBinary) {
-          // Binary audio data - validate and forward to Deepgram
-          try {
-            // Basic validation: check if data is not empty
-            if (!data || data.byteLength === 0) {
-              clientWs.send(JSON.stringify({
-                type: 'Error',
-                description: 'Invalid audio data: empty buffer',
-                code: 'AUDIO_FORMAT_ERROR'
-              }));
-              return;
-            }
-            deepgramAgent.send(data);
-          } catch (audioError) {
-            console.error('Audio format error:', audioError);
-            clientWs.send(JSON.stringify({
-              type: 'Error',
-              description: 'Invalid audio format',
-              code: 'AUDIO_FORMAT_ERROR'
-            }));
-          }
-        } else {
-          // JSON message - parse and handle
-          const message = JSON.parse(data.toString());
-
-          if (message.type === 'Settings') {
-            // Validate Settings message
-            if (!message.audio || !message.agent) {
-              clientWs.send(JSON.stringify({
-                type: 'Error',
-                description: 'Invalid Settings message: missing required fields',
-                code: 'INVALID_SETTINGS'
-              }));
-              return;
-            }
-
-            // Validate audio configuration
-            if (!message.audio.input || !message.audio.output) {
-              clientWs.send(JSON.stringify({
-                type: 'Error',
-                description: 'Invalid Settings message: missing audio configuration',
-                code: 'AUDIO_FORMAT_ERROR'
-              }));
-              return;
-            }
-
-            // Validate audio encoding and sample rate
-            const validEncodings = ['linear16', 'linear32', 'mulaw'];
-            if (!validEncodings.includes(message.audio.input.encoding) ||
-              !validEncodings.includes(message.audio.output.encoding)) {
-              clientWs.send(JSON.stringify({
-                type: 'Error',
-                description: 'Invalid audio encoding format',
-                code: 'AUDIO_FORMAT_ERROR'
-              }));
-              return;
-            }
-
-            if (!message.agent.listen || !message.agent.think || !message.agent.speak) {
-              clientWs.send(JSON.stringify({
-                type: 'Error',
-                description: 'Invalid Settings message: missing agent configuration',
-                code: 'INVALID_SETTINGS'
-              }));
-              return;
-            }
-
-            // Configure the agent with the provided settings
-            deepgramAgent.configure(message);
-          } else if (message.type === 'InjectUserMessage') {
-            // Use SDK method for injecting user messages
-            deepgramAgent.injectUserMessage(message.content);
-          } else {
-            // Forward other JSON messages as-is (send as string, not buffer)
-            deepgramAgent.send(JSON.stringify(message));
-          }
-        }
-      } catch (error) {
-        console.error('Error processing client message:', error);
-        if (clientWs.readyState === 1) {
-          clientWs.send(JSON.stringify({
-            type: 'Error',
-            description: error.message || 'Error processing message',
-            code: 'CONNECTION_FAILED'
-          }));
-        }
+    // Forward all messages from client to Deepgram
+    clientWs.on('message', (data, isBinary) => {
+      if (deepgramWs.readyState === WebSocket.OPEN) {
+        deepgramWs.send(data, { binary: isBinary });
       }
     });
 
     // Handle client disconnect
-    clientWs.on('close', async () => {
-      console.log('Client disconnected from /agent/converse');
-      if (deepgramAgent) {
-        try {
-          await deepgramAgent.disconnect();
-        } catch (error) {
-          console.error('Error disconnecting Deepgram agent:', error);
-        }
+    clientWs.on('close', (code, reason) => {
+      console.log(`Client disconnected: ${code} ${reason}`);
+      if (deepgramWs.readyState === WebSocket.OPEN) {
+        deepgramWs.close();
       }
     });
 
     // Handle client errors
     clientWs.on('error', (error) => {
       console.error('Client WebSocket error:', error);
+      if (deepgramWs.readyState === WebSocket.OPEN) {
+        deepgramWs.close();
+      }
     });
 
   } catch (error) {
-    console.error('Error initializing agent connection:', error);
-    if (clientWs.readyState === 1) {
+    console.error('Error setting up proxy:', error);
+    if (clientWs.readyState === WebSocket.OPEN) {
       clientWs.send(JSON.stringify({
         type: 'Error',
-        description: 'Failed to initialize agent connection',
+        description: 'Failed to establish proxy connection',
         code: 'CONNECTION_FAILED'
       }));
       clientWs.close();
@@ -321,6 +192,7 @@ wss.on('connection', async (clientWs) => {
 server.listen(CONFIG.port, CONFIG.host, () => {
   console.log(`Server running at http://localhost:${CONFIG.port}`);
   console.log(`WebSocket endpoint: ws://localhost:${CONFIG.port}/agent/converse`);
+  console.log(`Metadata endpoint: http://localhost:${CONFIG.port}/metadata`);
   if (CONFIG.isDevelopment) {
     console.log(`Make sure Vite dev server is running on port ${CONFIG.vitePort}`);
     console.log(`\n⚠️  Open your browser to http://localhost:${CONFIG.port}`);
