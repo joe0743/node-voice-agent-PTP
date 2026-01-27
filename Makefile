@@ -1,6 +1,9 @@
 # Voice Agent Makefile
 # Framework-agnostic commands for managing the project and git submodules
 
+# Use corepack to ensure correct pnpm version
+PNPM := corepack pnpm
+
 .PHONY: help init install install-frontend build dev start clean
 
 # Default target: show help
@@ -30,10 +33,10 @@ init:
 	git submodule update --init --recursive
 	@echo ""
 	@echo "==> Installing backend dependencies..."
-	pnpm install
+	$(PNPM) install
 	@echo ""
 	@echo "==> Installing frontend dependencies..."
-	cd frontend && pnpm install
+	cd frontend && $(PNPM) install
 	@echo ""
 	@echo "✓ Project initialized successfully!"
 	@echo ""
@@ -45,7 +48,7 @@ init:
 # Install backend dependencies
 install:
 	@echo "==> Installing backend dependencies..."
-	pnpm install
+	$(PNPM) install
 
 # Install frontend dependencies (requires submodule to be initialized)
 install-frontend:
@@ -54,7 +57,7 @@ install-frontend:
 		echo "Error: Frontend submodule not initialized. Run 'make init' first."; \
 		exit 1; \
 	fi
-	cd frontend && pnpm install
+	cd frontend && $(PNPM) install
 
 # Build frontend for production
 build:
@@ -63,7 +66,7 @@ build:
 		echo "Error: Frontend submodule not initialized. Run 'make init' first."; \
 		exit 1; \
 	fi
-	cd frontend && pnpm build
+	cd frontend && $(PNPM) build
 	@echo "✓ Frontend built to frontend/dist/"
 
 # Start development servers (backend + frontend with hot reload)
@@ -77,7 +80,7 @@ dev:
 		echo "Error: Frontend submodule not initialized. Run 'make init' first."; \
 		exit 1; \
 	fi
-	pnpm dev
+	$(PNPM) dev
 
 # Start production server (requires build)
 start:
@@ -90,7 +93,7 @@ start:
 		echo "Error: Frontend not built. Run 'make build' first."; \
 		exit 1; \
 	fi
-	pnpm start
+	$(PNPM) start
 
 # Update submodules to latest commits
 update:
