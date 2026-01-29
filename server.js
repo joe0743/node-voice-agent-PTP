@@ -27,7 +27,7 @@ const CONFIG = {
   deepgramAgentUrl: 'wss://agent.deepgram.com/v1/agent/converse',
   port: process.env.PORT || 8080,
   host: process.env.HOST || '0.0.0.0',
-  vitePort: process.env.VITE_PORT || 5173,
+  vitePort: process.env.VITE_PORT || 8081,
   isDevelopment: process.env.NODE_ENV === 'development',
 };
 
@@ -45,7 +45,18 @@ app.use(express.json());
 // API ROUTES
 // ============================================================================
 
-// Metadata endpoint - returns info from deepgram.toml
+// Metadata endpoint (standardized) - required for standardization compliance
+app.get('/api/metadata', (req, res) => {
+  res.json({
+    name: "Node Voice Agent Starter",
+    feature: "voice-agent",
+    language: "JavaScript",
+    framework: "Node",
+    version: "1.0.0"
+  });
+});
+
+// Legacy metadata endpoint - returns info from deepgram.toml
 app.get('/metadata', (req, res) => {
   try {
     const tomlPath = path.join(__dirname, 'deepgram.toml');
@@ -80,11 +91,11 @@ const server = createServer(app);
 // This pattern allows framework-agnostic frontend/backend integration:
 //
 // DEVELOPMENT MODE (NODE_ENV=development):
-//   - Vite dev server runs independently on port 5173 (or VITE_PORT)
+//   - Vite dev server runs independently on port 8081 (or VITE_PORT)
 //   - Backend proxies ALL requests to Vite for HMR and fast refresh
 //   - Vite proxies API routes (/agent, /metadata) back to backend
 //   - User accesses: http://localhost:8080
-//   - Flow: User → :8080 (Backend) → :5173 (Vite) → [API requests back to :8080]
+//   - Flow: User → :8080 (Backend) → :8081 (Vite) → [API requests back to :8080]
 //
 // PRODUCTION MODE (NODE_ENV=production or default):
 //   - Frontend is pre-built (npm run build) to frontend/dist
