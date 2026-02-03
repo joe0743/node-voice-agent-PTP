@@ -3,12 +3,13 @@
  *
  * Simple WebSocket proxy to Deepgram's Voice Agent API.
  * Forwards all messages (JSON and binary) bidirectionally between client and Deepgram.
+ * CORS-enabled for frontend communication.
  */
 
 const { WebSocketServer, WebSocket } = require('ws');
 const express = require('express');
 const { createServer } = require('http');
-const { createProxyMiddleware } = require('http-proxy-middleware');
+const cors = require('cors');
 require('dotenv').config();
 const path = require('path');
 const fs = require('fs');
@@ -19,10 +20,9 @@ const toml = require('toml');
 const CONFIG = {
   deepgramApiKey: process.env.DEEPGRAM_API_KEY,
   deepgramAgentUrl: 'wss://agent.deepgram.com/v1/agent/converse',
-  port: process.env.PORT || 8080,
+  port: process.env.PORT || 8081,
   host: process.env.HOST || '0.0.0.0',
-  vitePort: process.env.VITE_PORT || 8081,
-  isDevelopment: process.env.NODE_ENV === 'development',
+  frontendPort: process.env.FRONTEND_PORT || 8080,
 };
 
 // Validate required environment variables
@@ -34,6 +34,15 @@ if (!CONFIG.deepgramApiKey) {
 // Initialize Express
 const app = express();
 app.use(express.json());
+
+// Enable CORS for frontend
+app.use(cors({
+  origin: [
+    `http://localhost:${CONFIG.frontendPort}`,
+    `http://127.0.0.1:${CONFIG.frontendPort}`
+  ],
+  credentials: true
+}));
 
 // ============================================================================
 // API ROUTES
@@ -63,74 +72,8 @@ app.get('/api/metadata', (req, res) => {
   }
 });
 
-// Create HTTP server BEFORE setting up routes
-// This allows us to intercept WebSocket upgrades at the server level
+// Create HTTP server
 const server = createServer(app);
-
-// ============================================================================
-// FRONTEND SERVING (Development vs Production Pattern)
-// ============================================================================
-//
-// This pattern allows framework-agnostic frontend/backend integration:
-//
-// DEVELOPMENT MODE (NODE_ENV=development):
-//   - Vite dev server runs independently on port 8081 (or VITE_PORT)
-//   - Backend proxies ALL requests to Vite for HMR and fast refresh
-//   - Vite proxies API routes (/agent, /metadata) back to backend
-//   - User accesses: http://localhost:8080
-//   - Flow: User → :8080 (Backend) → :8081 (Vite) → [API requests back to :8080]
-//
-// PRODUCTION MODE (NODE_ENV=production or default):
-//   - Frontend is pre-built (npm run build) to frontend/dist
-//   - Backend serves static files directly from frontend/dist
-//   - Backend handles API routes directly
-//   - User accesses: http://localhost:8080
-//   - Flow: User → :8080 (Backend serves static + APIs)
-//
-// REPLICATION FOR OTHER FRAMEWORKS:
-//   Flask:     Use flask.send_from_directory() for static, requests.get() for proxy
-//   Django:    Use django.views.static.serve() for static, HttpResponse(requests.get()) for proxy
-//   Go:        Use http.FileServer() for static, httputil.NewSingleHostReverseProxy() for proxy
-//   .NET:      Use app.UseStaticFiles() for static, app.UseProxy() for proxy
-//
-// ============================================================================
-
-if (CONFIG.isDevelopment) {
-  console.log(`Development mode: Proxying to Vite dev server on port ${CONFIG.vitePort}`);
-
-  // Create proxy middleware for HTTP requests only (no WebSocket)
-  const viteProxy = createProxyMiddleware({
-    target: `http://localhost:${CONFIG.vitePort}`,
-    changeOrigin: true,
-    ws: false, // Disable automatic WebSocket proxying - we'll handle it manually
-  });
-
-  app.use('/', viteProxy);
-
-  // Manually handle WebSocket upgrades at the server level
-  // This allows us to selectively proxy based on path
-  server.on('upgrade', (request, socket, head) => {
-    const pathname = new URL(request.url, 'http://localhost').pathname;
-
-    console.log(`WebSocket upgrade request for: ${pathname}`);
-
-    // Backend handles /agent WebSocket connections directly
-    // The WebSocketServer below will handle these
-    if (pathname.startsWith('/agent')) {
-      console.log('Backend handling /agent WebSocket');
-      // Don't do anything - let the WebSocketServer handle it
-      return;
-    }
-
-    // Forward all other WebSocket connections (Vite HMR) to Vite
-    console.log('Proxying WebSocket to Vite');
-    viteProxy.upgrade(request, socket, head);
-  });
-} else {
-  console.log('Production mode: Serving static files from frontend/dist');
-  const distPath = path.join(__dirname, 'frontend', 'dist');
-  app.use(express.static(distPath));
-}
 
 // Create WebSocket server for agent endpoint
 const wss = new WebSocketServer({
@@ -237,13 +180,15 @@ wss.on('connection', async (clientWs, request) => {
 
 // Start the server
 server.listen(CONFIG.port, CONFIG.host, () => {
-  console.log(`Server running at http://localhost:${CONFIG.port}`);
-  console.log(`WebSocket endpoint: ws://localhost:${CONFIG.port}/agent/converse`);
-  console.log(`Metadata endpoint: http://localhost:${CONFIG.port}/metadata`);
-  if (CONFIG.isDevelopment) {
-    console.log(`Make sure Vite dev server is running on port ${CONFIG.vitePort}`);
-    console.log(`\n⚠️  Open your browser to http://localhost:${CONFIG.port}`);
-  }
+  console.log('');
+  console.log('======================================================================');
+  console.log(`🚀 Backend API Server running at http://localhost:${CONFIG.port}`);
+  console.log(`📡 CORS enabled for http://localhost:${CONFIG.frontendPort}`);
+  console.log(`📡 WebSocket endpoint: ws://localhost:${CONFIG.port}/agent/converse`);
+  console.log('');
+  console.log(`💡 Frontend should be running on http://localhost:${CONFIG.frontendPort}`);
+  console.log('======================================================================');
+  console.log('');
 });
 
 // Graceful shutdown
