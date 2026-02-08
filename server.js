@@ -3,7 +3,10 @@
  *
  * Simple WebSocket proxy to Deepgram's Voice Agent API.
  * Forwards all messages (JSON and binary) bidirectionally between client and Deepgram.
- * CORS-enabled for frontend communication.
+ *
+ * Routes:
+ *   WS  /api/voice-agent  - WebSocket proxy to Deepgram Agent API
+ *   GET /api/metadata      - Project metadata from deepgram.toml
  */
 
 const { WebSocketServer, WebSocket } = require('ws');
@@ -22,7 +25,6 @@ const CONFIG = {
   deepgramAgentUrl: 'wss://agent.deepgram.com/v1/agent/converse',
   port: process.env.PORT || 8081,
   host: process.env.HOST || '0.0.0.0',
-  frontendPort: process.env.FRONTEND_PORT || 8080,
 };
 
 // Validate required environment variables
@@ -35,14 +37,8 @@ if (!CONFIG.deepgramApiKey) {
 const app = express();
 app.use(express.json());
 
-// Enable CORS for frontend
-app.use(cors({
-  origin: [
-    `http://localhost:${CONFIG.frontendPort}`,
-    `http://127.0.0.1:${CONFIG.frontendPort}`
-  ],
-  credentials: true
-}));
+// Enable CORS (wildcard is safe -- same-origin via Vite proxy / Caddy in production)
+app.use(cors());
 
 // ============================================================================
 // API ROUTES
@@ -78,12 +74,12 @@ const server = createServer(app);
 // Create WebSocket server for agent endpoint
 const wss = new WebSocketServer({
   server,
-  path: '/agent/converse'
+  path: '/api/voice-agent'
 });
 
 // Handle WebSocket connections - simple pass-through proxy
 wss.on('connection', async (clientWs, request) => {
-  console.log('Client connected to /agent/converse');
+  console.log('Client connected to /api/voice-agent');
 
   try {
     // Extract API key from Sec-WebSocket-Protocol header or use server's key
@@ -184,10 +180,8 @@ server.listen(CONFIG.port, CONFIG.host, () => {
   console.log('');
   console.log('======================================================================');
   console.log(`🚀 Backend API Server running at http://localhost:${CONFIG.port}`);
-  console.log(`📡 CORS enabled for http://localhost:${CONFIG.frontendPort}`);
-  console.log(`📡 WebSocket endpoint: ws://localhost:${CONFIG.port}/agent/converse`);
-  console.log('');
-  console.log(`💡 Frontend should be running on http://localhost:${CONFIG.frontendPort}`);
+  console.log(`📡 WS   /api/voice-agent`);
+  console.log(`📡 GET  /api/metadata`);
   console.log('======================================================================');
   console.log('');
 });
