@@ -75,24 +75,24 @@ wss.on('connection', (clientWs) => {
   });
 
   // Forward Twilio → Deepgram
-  clientWs.on('message', (msg) => {
+  deepgramWs.on('message', (msg) => {
   try {
     const data = JSON.parse(msg);
 
-    // Only forward audio media frames
-    if (data.event === "media") {
-      if (deepgramWs.readyState === WebSocket.OPEN) {
-        deepgramWs.send(
-          JSON.stringify({
-            type: "input_audio",
-            audio: data.media.payload
-          })
-        );
+    // Only send synthesized audio back to Twilio
+    if (data.type === "output_audio" && data.audio) {
+      if (clientWs.readyState === WebSocket.OPEN) {
+        clientWs.send(JSON.stringify({
+          event: "media",
+          media: {
+            payload: data.audio
+          }
+        }));
       }
     }
 
   } catch (e) {
-    console.error("Invalid Twilio message format", e);
+    console.error("Deepgram message parse error", e);
   }
 });
 
