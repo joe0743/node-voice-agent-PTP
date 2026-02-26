@@ -135,10 +135,7 @@ wss.on('connection', async (clientWs, request) => {
   try {
     // Always use server-side API key for Deepgram connection
     console.log('Initiating Deepgram connection...');
-    const deepgramWs = new WebSocket(CONFIG.deepgramAgentUrl, [
-  "token",
-  `authorization:${CONFIG.deepgramApiKey}`
-]);
+    const deepgramWs = new WebSocket(CONFIG.deepgramAgentUrl, `Token ${CONFIG.deepgramApiKey}`);
 
     // Forward all messages from Deepgram to client
     deepgramWs.on('open', () => {
