@@ -18,7 +18,7 @@ if (!process.env.DEEPGRAM_API_KEY) {
 
 const CONFIG = {
   deepgramApiKey: process.env.DEEPGRAM_API_KEY,
-  deepgramAgentUrl: 'wss://agent.deepgram.com/v1/agent/listen',
+  deepgramAgentUrl: 'wss://agent.deepgram.com/v1/agent/converse',
   port: process.env.PORT || 8080,
   host: process.env.HOST || '0.0.0.0',
 };
