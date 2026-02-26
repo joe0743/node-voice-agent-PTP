@@ -57,6 +57,19 @@ wss.on('connection', (clientWs) => {
   });
 
   deepgramWs.on('open', () => console.log('✓ Connected to Deepgram Agent API'));
+  deepgramWs.send(JSON.stringify({
+  type: "Settings",
+  audio: {
+    input: {
+      encoding: "mulaw",
+      sample_rate: 8000
+    },
+    output: {
+      encoding: "mulaw",
+      sample_rate: 8000
+    }
+  }
+}));
 
   // Forward Deepgram → Twilio
   deepgramWs.on('message', (data, isBinary) => {
