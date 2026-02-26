@@ -222,24 +222,34 @@ server.on('upgrade', (request, socket, head) => {
   console.log(`WebSocket upgrade request for: ${pathname}`);
 
   if (pathname === '/api/voice-agent') {
-    // Validate JWT from subprotocol
+
     const protocols = request.headers['sec-websocket-protocol'];
+
+    // If Twilio (no protocol header), allow it
+    if (!protocols) {
+      console.log('Allowing unauthenticated WebSocket (Twilio)');
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+      });
+      return;
+    }
+
+    // Otherwise require JWT (browser clients)
     const validProto = validateWsToken(protocols);
     if (!validProto) {
-      console.log('WebSocket auth failed: invalid or missing token');
+      console.log('WebSocket auth failed: invalid token');
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
       return;
     }
 
-    console.log('Backend handling /api/voice-agent WebSocket (authenticated)');
+    console.log('Authenticated WebSocket connection');
     wss.handleUpgrade(request, socket, head, (ws) => {
       wss.emit('connection', ws, request);
     });
     return;
   }
 
-  // Unknown WebSocket path - reject
   console.log(`Unknown WebSocket path: ${pathname}`);
   socket.destroy();
 });
