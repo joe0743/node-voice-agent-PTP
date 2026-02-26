@@ -217,11 +217,11 @@ wss.on('connection', async (clientWs, request) => {
  * Validates JWT from access_token.<jwt> subprotocol before upgrading.
  */
 server.on('upgrade', (request, socket, head) => {
-  const pathname = new URL(request.url, 'http://localhost').pathname;
+  const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
 
   console.log(`WebSocket upgrade request for: ${pathname}`);
 
-  if (pathname === '/api/voice-agent') {
+  if (pathname === '/api/voice-agent' || pathname === '/twilio-stream') {
 
     const protocols = request.headers['sec-websocket-protocol'];
 
