@@ -304,3 +304,13 @@ server.listen(CONFIG.port, CONFIG.host, () => {
   console.log(`📡 GET  /api/metadata`);
   console.log("=".repeat(70) + "\n");
 });
+app.post("/voice", (req, res) => {
+  res.type("text/xml");
+  res.send(`
+    <Response>
+      <Connect>
+        <Stream url="wss://${req.headers.host}/api/voice-agent" />
+      </Connect>
+    </Response>
+  `);
+});
