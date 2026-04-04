@@ -74,12 +74,16 @@ wss.on('connection', (clientWs) => {
         sample_rate: 8000
       }
     }
+    console.log('✓ Audio encoding set');
+
   }));
 });
 
   // Forward Deepgram → Twilio
   deepgramWs.on('message', (data, isBinary) => {
     if (clientWs.readyState === WebSocket.OPEN) clientWs.send(data, { binary: isBinary });
+    console.log('✓ Deepgram -> Twilio ');
+
   });
 
   deepgramWs.on('error', (err) => {
@@ -92,7 +96,7 @@ wss.on('connection', (clientWs) => {
   deepgramWs.on('close', () => {
     if (clientWs.readyState === WebSocket.OPEN) clientWs.close();
   });
-
+  
   // Forward Twilio → Deepgram
   deepgramWs.on('message', (msg) => {
   try {
@@ -106,6 +110,8 @@ wss.on('connection', (clientWs) => {
           media: {
             payload: data.audio
           }
+        console.log('✓ Twilio → Deepgram');
+
         }));
       }
     }
@@ -118,6 +124,8 @@ wss.on('connection', (clientWs) => {
   clientWs.on('close', () => {
     if (deepgramWs.readyState === WebSocket.OPEN) deepgramWs.close();
     activeConnections.delete(clientWs);
+  console.log('✓ Closed');
+
   });
 
   clientWs.on('error', () => {
