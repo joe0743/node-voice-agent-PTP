@@ -31,7 +31,7 @@ const activeConnections = new Set();
 app.use(cors());
 
 // ============================
-// Twilio /voice endpoint
+// Twilio /voice endpoint.
 // ============================
 app.post('/voice', (req, res) => {
   res.type('text/xml');
