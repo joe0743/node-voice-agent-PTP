@@ -44,9 +44,9 @@ app.post('/voice', (req, res) => {
   `);
 });
 
-app.post("/", (req, res) => {
-  res.type("text/xml");
-  res.send("<Response><Say>Hello from Railway</Say></Response>");
+app.post('/', (req, res) => {
+  res.type('text/xml');
+  res.send('<Response><Say>Hello from Railway</Say></Response>');
 });
 
 // ============================
@@ -67,17 +67,17 @@ wss.on('connection', (clientWs) => {
     console.log('✓ Connected to Deepgram Agent API');
 
     deepgramWs.send(JSON.stringify({
-      type: "Settings",
+      type: 'Settings',
       audio: {
         input: {
-          encoding: "mulaw",
-          sample_rate: 8000
+          encoding: 'mulaw',
+          sample_rate: 8000,
         },
         output: {
-          encoding: "mulaw",
-          sample_rate: 8000
-        }
-      }
+          encoding: 'mulaw',
+          sample_rate: 8000,
+        },
+      },
     }));
   });
 
@@ -85,6 +85,8 @@ wss.on('connection', (clientWs) => {
   // Deepgram → Twilio
   // ============================
   deepgramWs.on('message', (msg) => {
+    console.log('DEEPGRAM RAW:', msg.toString());
+
     let data;
     try {
       data = JSON.parse(msg.toString());
@@ -92,16 +94,28 @@ wss.on('connection', (clientWs) => {
       return;
     }
 
-    if (data.type === 'Welcome' || data.type === 'SettingsApplied') return;
+    if (data.type === 'Welcome' || data.type === 'SettingsApplied') {
+      return;
+    }
+
+    if (data.type === 'Error' || data.type === 'Warning') {
+      console.error('DEEPGRAM ERROR/WARNING:', data);
+      return;
+    }
 
     if (data.type === 'output_audio' && data.audio && clientWs.readyState === WebSocket.OPEN) {
-      console.log("✓ Deepgram → Twilio (audio)");
+      console.log('✓ Deepgram → Twilio (audio)');
       clientWs.send(JSON.stringify({
         event: 'media',
         streamSid: twilioStreamSid,
-        media: { payload: data.audio }
+        media: { payload: data.audio },
       }));
     }
+  });
+
+  deepgramWs.on('close', (code, reason) => {
+    console.log('✓ Deepgram closed', code, reason?.toString());
+    if (clientWs.readyState === WebSocket.OPEN) clientWs.close();
   });
 
   deepgramWs.on('error', (err) => {
@@ -111,18 +125,13 @@ wss.on('connection', (clientWs) => {
     }
   });
 
-  deepgramWs.on('close', () => {
-    if (clientWs.readyState === WebSocket.OPEN) clientWs.close();
-    console.log('✓ Deepgram closed');
-  });
-
   // ============================
   // Twilio → Deepgram
   // ============================
   clientWs.on('message', (msg) => {
     try {
       const data = JSON.parse(msg.toString());
-      console.log("TWILIO:", data);
+      console.log('TWILIO:', data);
 
       if (data.event === 'start' && data.start?.streamSid) {
         twilioStreamSid = data.start.streamSid;
@@ -132,7 +141,7 @@ wss.on('connection', (clientWs) => {
       if (data.event === 'media' && data.media?.payload && deepgramWs.readyState === WebSocket.OPEN) {
         deepgramWs.send(JSON.stringify({
           type: 'input_audio_buffer.append',
-          audio: data.media.payload
+          audio: data.media.payload,
         }));
       }
 
