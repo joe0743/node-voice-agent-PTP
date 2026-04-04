@@ -38,8 +38,7 @@ app.post('/voice', (req, res) => {
   res.send(`
     <Response>
       <Connect>
-        <Stream url="wss://${req.headers.host}/twilio-stream"
-                track="inbound_audio" />
+        <Stream url="wss://${req.headers.host}/twilio-stream" />
       </Connect>
     </Response>
   `);
