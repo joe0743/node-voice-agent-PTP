@@ -131,7 +131,7 @@ wss.on('connection', (clientWs) => {
 
       if (data.event === 'media' && data.media?.payload && deepgramWs.readyState === WebSocket.OPEN) {
         deepgramWs.send(JSON.stringify({
-          type: 'input_audio_buffer',
+          type: 'input_audio_buffer.append',
           audio: data.media.payload
         }));
       }
