@@ -142,7 +142,10 @@ wss.on('connection', (clientWs) => {
         deepgramWs.send(JSON.stringify({
           type: 'input_audio_buffer.append',
           audio: data.media.payload,
-        }));
+        })
+		{ binary: false }   // ← REQUIRED
+
+		);
       }
 
     } catch (e) {
