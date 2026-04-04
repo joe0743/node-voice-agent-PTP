@@ -43,7 +43,10 @@ app.post('/voice', (req, res) => {
     </Response>
   `);
 });
-
+app.post("/", (req, res) => {
+  res.type("text/xml");
+  res.send("<Response><Say>Hello from Railway</Say></Response>");
+});
 // ============================
 // WebSocket proxy to Deepgram
 // ============================
