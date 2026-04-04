@@ -53,6 +53,7 @@ app.post("/", (req, res) => {
 wss.on('connection', (clientWs) => {
   console.log('Twilio client connected');
   activeConnections.add(clientWs);
+  let twilioStreamSid = null;
 
   // Connect to Deepgram with Authorization header, NO subprotocols
   const deepgramWs = new WebSocket(CONFIG.deepgramAgentUrl, {
@@ -80,10 +81,26 @@ wss.on('connection', (clientWs) => {
 });
 
   // Forward Deepgram → Twilio
-  deepgramWs.on('message', (data, isBinary) => {
-    if (clientWs.readyState === WebSocket.OPEN) clientWs.send(data, { binary: isBinary });
-    console.log('✓ Deepgram -> Twilio ');
+  deepgramWs.on('message', (msg) => {
+    console.log('✓ Deepgram -> Twilio');
+    let data;
+    try {
+      data = JSON.parse(msg.toString());
+    } catch {
+      return;
+    }
 
+    if (data.type === 'Welcome' || data.type === 'SettingsApplied') return;
+
+    if (data.type === 'output_audio' && data.audio && clientWs.readyState === WebSocket.OPEN) {
+      clientWs.send(
+        JSON.stringify({
+          event: 'media',
+          streamSid: twilioStreamSid,
+          media: { payload: data.audio },
+        })
+      );
+    }
   });
 
   deepgramWs.on('error', (err) => {
@@ -99,29 +116,28 @@ wss.on('connection', (clientWs) => {
   });
   
   // Forward Twilio → Deepgram
-  deepgramWs.on('message', (msg) => {
+  clientWs.on('message', (msg) => {
     console.log('✓ Twilio → Deepgram');
-  try {
-    const data = JSON.parse(msg);
+    try {
+      const data = JSON.parse(msg.toString());
 
-    // Only send synthesized audio back to Twilio
-    if (data.type === "output_audio" && data.audio) {
-      if (clientWs.readyState === WebSocket.OPEN) {
-        clientWs.send(JSON.stringify({
-          event: "media",
-          media: {
-            payload: data.audio
-          }
-        
-
-        }));
+      if (data.event === 'start' && data.start?.streamSid) {
+        twilioStreamSid = data.start.streamSid;
+        return;
       }
-    }
 
-  } catch (e) {
-    console.error("Deepgram message parse error", e);
-  }
-});
+      if (data.event === 'media' && data.media?.payload && deepgramWs.readyState === WebSocket.OPEN) {
+        deepgramWs.send(
+          JSON.stringify({
+            type: 'input_audio_buffer.append',
+            audio: data.media.payload,
+          })
+        );
+      }
+    } catch (e) {
+      console.error('Twilio message parse error', e);
+    }
+  });
 
   clientWs.on('close', () => {
     if (deepgramWs.readyState === WebSocket.OPEN) deepgramWs.close();
