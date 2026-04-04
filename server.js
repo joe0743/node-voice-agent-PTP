@@ -50,91 +50,70 @@ app.post("/", (req, res) => {
 // ============================
 // WebSocket proxy to Deepgram
 // ============================
-
 wss.on('connection', (clientWs) => {
   console.log('Twilio client connected');
   activeConnections.add(clientWs);
 
-  // Connect to Deepgram Voice Agent
+  // Connect to Deepgram with Authorization header, NO subprotocols
   const deepgramWs = new WebSocket(CONFIG.deepgramAgentUrl, {
     headers: { Authorization: `Token ${CONFIG.deepgramApiKey}` },
   });
 
-  // Deepgram connection established
   deepgramWs.on('open', () => {
-    console.log('✓ Connected to Deepgram Agent API');
+  console.log('✓ Connected to Deepgram Agent API');
 
-    // Configure audio settings
-    deepgramWs.send(JSON.stringify({
-      type: "Settings",
-      audio: {
-        input: {
-          encoding: "mulaw",
-          sample_rate: 8000
-        },
-        output: {
-          encoding: "mulaw",
-          sample_rate: 8000
-        }
+  deepgramWs.send(JSON.stringify({
+    type: "Settings",
+    audio: {
+      input: {
+        encoding: "mulaw",
+        sample_rate: 8000
+      },
+      output: {
+        encoding: "mulaw",
+        sample_rate: 8000
       }
-    }));
-  });
-
-  // -----------------------------
-  // TWILIO → DEEPGRAM
-  // -----------------------------
-  clientWs.on('message', (msg) => {
-    try {
-      const data = JSON.parse(msg.toString());
-
-      // Twilio sends base64 mulaw audio inside "media.payload"
-      if (data.event === "media" && data.media && data.media.payload) {
-        deepgramWs.send(JSON.stringify({
-          type: "input_audio_buffer",
-          audio: data.media.payload   // still base64
-        }));
-      }
-
-    } catch (err) {
-      console.error("Twilio message parse error:", err);
     }
+  }));
+});
+
+  // Forward Deepgram → Twilio
+  deepgramWs.on('message', (data, isBinary) => {
+    if (clientWs.readyState === WebSocket.OPEN) clientWs.send(data, { binary: isBinary });
   });
 
-  // -----------------------------
-  // DEEPGRAM → TWILIO
-  // -----------------------------
-  deepgramWs.on('message', (msg) => {
-    try {
-      const data = JSON.parse(msg.toString());
-
-      // Deepgram Voice Agent sends synthesized audio as base64 mulaw
-      if (data.type === "output_audio" && data.audio) {
-        if (clientWs.readyState === WebSocket.OPEN) {
-          clientWs.send(JSON.stringify({
-            event: "media",
-            media: { payload: data.audio }
-          }));
-        }
-      }
-
-    } catch (err) {
-      console.error("Deepgram message parse error:", err);
-    }
-  });
-
-  // -----------------------------
-  // ERROR + CLEANUP HANDLERS
-  // -----------------------------
   deepgramWs.on('error', (err) => {
-    console.error("Deepgram WebSocket error:", err);
+    console.error('Deepgram WebSocket error:', err);
     if (clientWs.readyState === WebSocket.OPEN) {
-      clientWs.send(JSON.stringify({ type: "Error", description: err.message }));
+      clientWs.send(JSON.stringify({ type: 'Error', description: err.message }));
     }
   });
 
   deepgramWs.on('close', () => {
     if (clientWs.readyState === WebSocket.OPEN) clientWs.close();
   });
+
+  // Forward Twilio → Deepgram
+  deepgramWs.on('message', (msg) => {
+  try {
+    const data = JSON.parse(msg);
+
+    // Only send synthesized audio back to Twilio
+    if (data.type === "output_audio" && data.audio) {
+      if (clientWs.readyState === WebSocket.OPEN) {
+        clientWs.send(JSON.stringify({
+          event: "media",
+          media: {
+            payload: data.audio
+          }
+        }));
+      }
+    }
+
+  } catch (e) {
+    console.error("Deepgram message parse error", e);
+  }
+});
 
   clientWs.on('close', () => {
     if (deepgramWs.readyState === WebSocket.OPEN) deepgramWs.close();
@@ -145,10 +124,6 @@ wss.on('connection', (clientWs) => {
     if (deepgramWs.readyState === WebSocket.OPEN) deepgramWs.close();
   });
 });
-
-
-
-
 
 // ============================
 // Upgrade HTTP → WS for Twilio
