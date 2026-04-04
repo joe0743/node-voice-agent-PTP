@@ -74,7 +74,7 @@ wss.on('connection', (clientWs) => {
         sample_rate: 8000
       }
     }
-    console.log('✓ Audio encoding set');
+    
 
   }));
 });
@@ -95,10 +95,12 @@ wss.on('connection', (clientWs) => {
 
   deepgramWs.on('close', () => {
     if (clientWs.readyState === WebSocket.OPEN) clientWs.close();
+    console.log('✓ Closed');
   });
   
   // Forward Twilio → Deepgram
   deepgramWs.on('message', (msg) => {
+    console.log('✓ Twilio → Deepgram');
   try {
     const data = JSON.parse(msg);
 
@@ -110,7 +112,7 @@ wss.on('connection', (clientWs) => {
           media: {
             payload: data.audio
           }
-        console.log('✓ Twilio → Deepgram');
+        
 
         }));
       }
@@ -124,12 +126,13 @@ wss.on('connection', (clientWs) => {
   clientWs.on('close', () => {
     if (deepgramWs.readyState === WebSocket.OPEN) deepgramWs.close();
     activeConnections.delete(clientWs);
-  console.log('✓ Closed');
+    console.log('✓ Closed');
 
   });
 
   clientWs.on('error', () => {
     if (deepgramWs.readyState === WebSocket.OPEN) deepgramWs.close();
+    console.log('ERROR');
   });
 });
 
@@ -137,6 +140,7 @@ wss.on('connection', (clientWs) => {
 // Upgrade HTTP → WS for Twilio
 // ============================
 server.on('upgrade', (request, socket, head) => {
+  console.log('✓ Upgrade');
   const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
   if (pathname === '/twilio-stream') {
     wss.handleUpgrade(request, socket, head, (ws) => wss.emit('connection', ws, request));
